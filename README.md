@@ -479,7 +479,7 @@ These are local fixtures, not claims about every MCP implementation. The CI job 
 
 A separate [interoperability validation](docs/VALIDATION.md) compares MCPEnum with the original Nmap MCP scripts across public Go, TypeScript, Python, and Rust server projects, including legacy SSE, a custom path, and per-command timing. It explains protocol-version differences and the limits of the local measurements.
 
-The [tool audit and improvement roadmap](docs/auditoria-ferramenta-2026-10-25.md) records the port-probe comparison, practices already applied, and the next accuracy improvements.
+The [capability audit and improvement roadmap](docs/AUDIT.md) records the HTTP evidence checks and the next scoped improvements to evaluate.
 
 ## Troubleshooting and FAQ
 
