@@ -26,12 +26,14 @@ var errBodyLimit = errors.New("response exceeds body limit")
 var errCrossOrigin = errors.New("redirect outside target origin")
 
 type wireReply struct {
-	RPC        rpcResponse
-	HTTPStatus int
-	Headers    http.Header
-	Bytes      int64
-	ElapsedMS  int64
-	Err        error
+	RPC              rpcResponse
+	HTTPStatus       int
+	Headers          http.Header
+	ResolvedPath     string
+	ResolvedHasQuery bool
+	Bytes            int64
+	ElapsedMS        int64
+	Err              error
 }
 
 type client struct {
@@ -163,7 +165,7 @@ func (c *client) do(req *http.Request, id int64) wireReply {
 		return wireReply{Err: err}
 	}
 	defer resp.Body.Close()
-	out := wireReply{HTTPStatus: resp.StatusCode, Headers: resp.Header.Clone()}
+	out := wireReply{HTTPStatus: resp.StatusCode, Headers: resp.Header.Clone(), ResolvedPath: resp.Request.URL.EscapedPath(), ResolvedHasQuery: resp.Request.URL.RawQuery != ""}
 	if id == 0 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return out
@@ -271,6 +273,9 @@ func (c *client) record(method, phase string, reply wireReply) {
 		status = "absent"
 	}
 	o := Observation{ID: id, Phase: phase, Method: method, Path: c.endpoint.EscapedPath(), HTTPStatus: reply.HTTPStatus, HTTPServer: boundedHeader(reply.Headers.Get("Server")), ContentType: boundedHeader(reply.Headers.Get("Content-Type")), RPCStatus: status, ElapsedMS: reply.ElapsedMS, BytesReceived: reply.Bytes}
+	if reply.ResolvedPath != "" && reply.ResolvedPath != o.Path {
+		o.ResolvedPath = reply.ResolvedPath
+	}
 	if reply.RPC.Error != nil {
 		o.RPCCode = reply.RPC.Error.Code
 	}

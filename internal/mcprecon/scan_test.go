@@ -45,6 +45,11 @@ func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
 	if err != nil || !containsURL(urls, "http://127.0.0.1:8000/rpc") {
 		t.Fatalf("broad discovery missing /rpc: %v", err)
 	}
+	cfg.Paths = ExtensivePaths()
+	urls, err = expandTargets(cfg)
+	if err != nil || !containsURL(urls, "http://127.0.0.1:8000/api/v1/mcp") || !containsURL(urls, "http://127.0.0.1:8000/server/mcp") {
+		t.Fatalf("extensive discovery missing nested MCP paths: %v", err)
+	}
 }
 
 func containsURL(urls []string, want string) bool {
@@ -75,6 +80,57 @@ func TestNonMCPResponseKeepsHTTPFingerprint(t *testing.T) {
 	}
 	if got := results[0].Observations[0].HTTPServer; got != "fixture-http" {
 		t.Fatalf("HTTP server header = %q", got)
+	}
+}
+
+func TestSameOriginRedirectReportsResolvedMCPEndpoint(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp/" {
+			http.Redirect(w, r, "/mcp", http.StatusTemporaryRedirect)
+			return
+		}
+		if r.URL.Path == "/mcp-query/" {
+			http.Redirect(w, r, "/mcp?tenant=private", http.StatusTemporaryRedirect)
+			return
+		}
+		var req testRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if r.URL.Path != "/mcp" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		switch req.Method {
+		case "server/discover":
+			respond(w, req.ID, map[string]any{"supportedVersions": []string{modernVersion}, "capabilities": map[string]any{}})
+		case "tools/list":
+			respond(w, req.ID, map[string]any{"tools": []any{}})
+		case "resources/list":
+			respond(w, req.ID, map[string]any{"resources": []any{}})
+		case "resources/templates/list":
+			respond(w, req.ID, map[string]any{"resourceTemplates": []any{}})
+		case "prompts/list":
+			respond(w, req.ID, map[string]any{"prompts": []any{}})
+		default:
+			t.Errorf("unexpected method %q", req.Method)
+		}
+	}))
+	defer s.Close()
+	cfg := Defaults()
+	cfg.URLs = []string{s.URL + "/mcp/"}
+	results, err := Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results[0].Services) != 1 || results[0].Services[0].Endpoint != "/mcp" || results[0].Observations[0].ResolvedPath != "/mcp" {
+		t.Fatalf("redirect not resolved: %+v", results[0])
+	}
+	cfg.URLs = []string{s.URL + "/mcp-query/"}
+	results, err = Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results[0].Services[0].Endpoint != "/mcp-query/" || results[0].Observations[0].ResolvedPath != "/mcp" {
+		t.Fatalf("query-bearing redirect should not merge with a different candidate: %+v", results[0])
 	}
 }
 
@@ -289,7 +345,7 @@ func TestTokenDoesNotHidePublicAccess(t *testing.T) {
 func TestLegacyHTTPSSE(t *testing.T) {
 	messages := make(chan string, 8)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/sse" && r.Method == http.MethodGet {
+		if strings.HasSuffix(r.URL.Path, "/sse") && r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, "event: endpoint\ndata: /messages\n\n")
 			w.(http.Flusher).Flush()
@@ -303,7 +359,7 @@ func TestLegacyHTTPSSE(t *testing.T) {
 				}
 			}
 		}
-		if r.URL.Path == "/sse" {
+		if strings.HasSuffix(r.URL.Path, "/sse") {
 			w.WriteHeader(405)
 			return
 		}
@@ -338,16 +394,18 @@ func TestLegacyHTTPSSE(t *testing.T) {
 	}))
 	defer s.Close()
 	cfg := Defaults()
-	cfg.URLs = []string{s.URL + "/sse"}
-	res, e := Scan(context.Background(), cfg)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if len(res[0].Services) != 1 || res[0].Services[0].MCP.Transport != "legacy_http_sse" {
-		t.Fatalf("result=%+v", res[0])
-	}
-	if res[0].Services[0].MCP.Inventories["anonymous"].Tools.Status != "empty" {
-		t.Fatal("SSE enumeration failed")
+	for _, path := range []string{"/sse", "/mcp/sse", "/api/sse"} {
+		cfg.URLs = []string{s.URL + path}
+		res, e := Scan(context.Background(), cfg)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(res[0].Services) != 1 || res[0].Services[0].MCP.Transport != "legacy_http_sse" {
+			t.Fatalf("path=%s result=%+v", path, res[0])
+		}
+		if res[0].Services[0].MCP.Inventories["anonymous"].Tools.Status != "empty" {
+			t.Fatalf("SSE enumeration failed at %s", path)
+		}
 	}
 }
 

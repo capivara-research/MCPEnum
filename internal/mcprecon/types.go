@@ -112,6 +112,7 @@ type Observation struct {
 	Phase         string `json:"phase,omitempty"`
 	Method        string `json:"method"`
 	Path          string `json:"path,omitempty"`
+	ResolvedPath  string `json:"resolved_path,omitempty"`
 	HTTPStatus    int    `json:"http_status,omitempty"`
 	HTTPServer    string `json:"http_server,omitempty"`
 	ContentType   string `json:"content_type,omitempty"`

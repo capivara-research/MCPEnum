@@ -4,7 +4,7 @@ This document explains what a default `mcpenum scan` does on the wire and how to
 
 ## 1. Choose endpoints
 
-`--url` uses the URL exactly as supplied, adding `/mcp` only when there is no path. `--target` expands a host across selected ports and paths. The standard profile contains seven common paths; `--path-profile broad` contains 15. Supplying `--path` replaces the profile with the explicit path list. Explicit URLs and expanded targets are deduplicated. CIDR expansion is disabled until `--allow-cidr` is supplied, and `--max-hosts` caps it.
+`--url` uses the URL exactly as supplied, adding `/mcp` only when there is no path. `--target` expands a host across selected ports and paths. The path profiles contain 7 (`standard`), 15 (`broad`), or 27 (`extensive`) candidates. Supplying `--path` or `--paths-file` replaces the profile with explicit paths; the two custom sources combine. Custom paths are capped at 128 entries and 256 bytes each. Explicit URLs and expanded targets are deduplicated. CIDR expansion is disabled until `--allow-cidr` is supplied, and `--max-hosts` caps it.
 
 Each endpoint receives its own time budget. Multiple endpoints can run concurrently, bounded by `--workers`. `--rate` caps aggregate HTTP request rate across the scan.
 
@@ -16,7 +16,7 @@ If modern discovery does not confirm the endpoint, MCPEnum sends one legacy `ini
 
 A server can return a plausible `initialize` shape with no protocol version or a nonstandard version. MCPEnum only confirms such a server after a valid `tools/list` response. If that list fails, detection remains inconclusive. This is useful for training servers and custom bridges without treating every JSON response as confirmed MCP.
 
-For legacy HTTP+SSE endpoints, MCPEnum uses the event stream and message endpoint when the candidate path is `/sse`. It still applies the same response and time limits.
+For legacy HTTP+SSE endpoints, MCPEnum uses the event stream and message endpoint when the candidate path ends in `/sse` (for example `/sse`, `/api/sse`, or `/mcp/sse`). It still applies the same response and time limits.
 
 ## 3. List inventory
 
@@ -60,7 +60,9 @@ Terminal text escapes control characters that could otherwise hide content or ma
 
 ## 6. Record evidence and limits
 
-The JSON result contains a `services` array, `observations`, and `metrics`. Observations record the phase, MCP method, path, HTTP status, JSON-RPC status or code, elapsed time, and response size. Bounded HTTP `Server` and `Content-Type` response headers are also recorded, so a non-MCP HTTP candidate can still provide a service clue. A header is self-reported and does not prove a product or version. Findings and collections refer to observations by evidence ID. Bearer tokens and session IDs are not included in output.
+The JSON result contains a `services` array, `observations`, and `metrics`. Observations record the phase, MCP method, path, HTTP status, JSON-RPC status or code, elapsed time, and response size. Bounded HTTP `Server` and `Content-Type` response headers are also recorded, so a non-MCP HTTP candidate can still provide a service clue. `resolved_path` records a same-origin redirect's final path when it differs from the candidate; confirmed service identity uses that final path. A header is self-reported and does not prove a product or version. Findings and collections refer to observations by evidence ID. Bearer tokens and session IDs are not included in output.
+
+For multi-candidate text scans, MCPEnum prints a summary, one full inventory per distinct confirmed endpoint, and compact rows for other candidates. Redirect aliases are shown without repeating the same inventory. JSON/JSONL preserves every candidate result for audit and automation.
 
 MCPEnum uses a per-request timeout, a per-endpoint budget, a maximum response body size, and inventory page and item caps. HTTPS certificate verification is enabled by default. HTTP redirects are restricted to the original target origin. `--insecure` is an explicit opt-in for test environments with untrusted certificates.
 

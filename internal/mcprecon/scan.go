@@ -20,14 +20,24 @@ import (
 
 var standardPaths = []string{"/mcp", "/", "/sse", "/api/mcp", "/mcp/v1", "/v1/mcp", "/messages"}
 var broadPaths = []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
+var extensivePaths = []string{
+	"/mcp", "/", "/sse", "/api/mcp", "/mcp/v1", "/v1/mcp", "/messages",
+	"/mcp/", "/api/mcp/", "/api/v1/mcp", "/api/v2/mcp", "/server/mcp", "/mcp/server",
+	"/rpc", "/jsonrpc", "/mcp/sse", "/api/sse", "/api/v1/sse", "/mcp/message", "/mcp/messages",
+	"/message", "/stream", "/api/stream", "/api", "/server", "/api/v1", "/mcp-server",
+}
 
-func BroadPaths() []string { return append([]string(nil), broadPaths...) }
+func BroadPaths() []string     { return append([]string(nil), broadPaths...) }
+func ExtensivePaths() []string { return append([]string(nil), extensivePaths...) }
 
 func Defaults() Config {
 	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: append([]string(nil), standardPaths...), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0"}
 }
 
 func Scan(ctx context.Context, cfg Config) ([]Result, error) {
+	if len(cfg.Paths) > 128 {
+		return nil, errors.New("too many candidate paths (maximum 128)")
+	}
 	urls, err := expandTargets(cfg)
 	if err != nil {
 		return nil, err
@@ -148,7 +158,7 @@ func expandTargets(cfg Config) ([]string, error) {
 }
 
 func safePath(p string) bool {
-	return strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.ContainsAny(p, "\r\n\\?#") && !strings.Contains(p, "..")
+	return len(p) <= 256 && strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.ContainsAny(p, "\r\n\\?#") && !strings.Contains(p, "..")
 }
 
 func scanURL(ctx context.Context, raw string, cfg Config) Result {
@@ -258,6 +268,9 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 	svc := &Service{Kind: "mcp", Endpoint: c.endpoint.Path, Detection: Detection{Status: "inconclusive", EvidenceIDs: []string{}}, Authentication: Authentication{Anonymous: "not_tested", Credentialed: "not_tested"}, MCP: MCP{Transport: "unknown", Era: "unknown", Inventories: map[string]Collections{}}}
 	var seedTools *Collection
 	disc := c.request(ctx, "server/discover", nil, "discovery")
+	if disc.ResolvedPath != "" && !disc.ResolvedHasQuery {
+		svc.Endpoint = disc.ResolvedPath
+	}
 	discID := lastID(r)
 	if disc.HTTPStatus == 401 || disc.HTTPStatus == 403 {
 		svc.Detection.Reason = "HTTP authentication challenge; MCP unconfirmed"
@@ -297,10 +310,16 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 	if svc.Detection.Status != "confirmed" {
 		// A failed modern probe is not evidence of MCP. Try one legacy handshake.
 		init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
+		if init.ResolvedPath != "" && !init.ResolvedHasQuery {
+			svc.Endpoint = init.ResolvedPath
+		}
 		initID := lastID(r)
 		if init.RPC.Error != nil && init.RPC.Error.Code == -32022 {
 			if offered := legacyOffer(init.RPC.Error.Data); offered != "" && offered != legacyVersion {
 				init = c.request(ctx, "initialize", map[string]any{"protocolVersion": offered, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
+				if init.ResolvedPath != "" && !init.ResolvedHasQuery {
+					svc.Endpoint = init.ResolvedPath
+				}
 				initID = lastID(r)
 			}
 		}
@@ -344,7 +363,7 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 			} else {
 				svc.Detection = Detection{Status: "inconclusive", Confidence: "low", EvidenceIDs: []string{initID, probeID}, Reason: "nonconformant initialize; tools/list did not confirm MCP (" + listed.Status + ")"}
 			}
-		} else if c.endpoint.Path == "/sse" && ctx.Err() == nil {
+		} else if strings.HasSuffix(c.endpoint.Path, "/sse") && ctx.Err() == nil {
 			if e := c.startLegacySSE(ctx); e == nil {
 				init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
 				if init.Err == nil && init.RPC.Error == nil && acceptInitialize(init.RPC.Result, svc) {
@@ -357,7 +376,7 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 				}
 			}
 		}
-		if svc.Detection.Status != "confirmed" && (disc.HTTPStatus == 404 || disc.HTTPStatus == 405) && (init.HTTPStatus == 404 || init.HTTPStatus == 405) && c.endpoint.Path != "/sse" {
+		if svc.Detection.Status != "confirmed" && (disc.HTTPStatus == 404 || disc.HTTPStatus == 405) && (init.HTTPStatus == 404 || init.HTTPStatus == 405) && !strings.HasSuffix(c.endpoint.Path, "/sse") {
 			return nil, "unknown"
 		}
 	}

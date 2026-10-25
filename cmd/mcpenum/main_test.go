@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -53,6 +57,53 @@ func TestTerminalOutputShowsActionableInventory(t *testing.T) {
 	}
 }
 
+func TestPathsFileFindsCustomMountedEndpoint(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if r.URL.Path != "/tenant/notes/mcp" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		result := map[string]any{}
+		switch req.Method {
+		case "server/discover":
+			result = map[string]any{"supportedVersions": []string{"2026-07-28"}, "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "notes_search"}}}
+		case "resources/list":
+			result = map[string]any{"resources": []any{}}
+		case "resources/templates/list":
+			result = map[string]any{"resourceTemplates": []any{}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []any{}}
+		default:
+			t.Errorf("unexpected method %q", req.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	}))
+	defer s.Close()
+	file := filepath.Join(t.TempDir(), "paths.txt")
+	if err := os.WriteFile(file, []byte("# custom deployment\n/tenant/notes/mcp\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errout bytes.Buffer
+	if err := run([]string{"scan", "--target", strings.TrimPrefix(s.URL, "http://"), "--paths-file", file, "--format", "json"}, &out, &errout); err != nil {
+		t.Fatal(err)
+	}
+	var result mcprecon.Result
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Services) != 1 || result.Services[0].Detection.Status != "confirmed" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
+		t.Fatalf("custom path not enumerated: %+v", result)
+	}
+}
+
 func TestTerminalColorModes(t *testing.T) {
 	var out bytes.Buffer
 	if terminalColorEnabled("auto", &out) || terminalColorEnabled("never", os.Stdout) {
@@ -79,6 +130,45 @@ func TestTerminalUnconfirmedShowsProbeEvidence(t *testing.T) {
 		if !strings.Contains(got, expected) {
 			t.Errorf("missing %q in output:\n%s", expected, got)
 		}
+	}
+}
+
+func TestMultipleCandidatesKeepConfirmedDetailAndCompactMisses(t *testing.T) {
+	confirmed := mcprecon.Result{
+		Target:     mcprecon.Target{Input: "http://lab.test/mcp"},
+		ScanStatus: "completed",
+		Services: []mcprecon.Service{{
+			Endpoint:  "/mcp",
+			Detection: mcprecon.Detection{Status: "confirmed", Confidence: "high"},
+			MCP:       mcprecon.MCP{Inventories: map[string]mcprecon.Collections{}},
+		}},
+	}
+	miss := mcprecon.Result{
+		Target:       mcprecon.Target{Input: "http://lab.test/api/mcp"},
+		ScanStatus:   "completed",
+		Observations: []mcprecon.Observation{{Phase: "discovery", Method: "initialize", HTTPStatus: 404, HTTPServer: "fixture-http"}},
+	}
+	var out bytes.Buffer
+	printResultsStyled(&out, []mcprecon.Result{confirmed, miss}, false, false)
+	got := out.String()
+	for _, expected := range []string{"DISCOVERY SUMMARY  candidates: 2 | MCP endpoints: 1", "IDENTIFICATION", "OTHER CANDIDATES", "http://lab.test/api/mcp — MCP not confirmed | HTTP 404 | server: fixture-http", "Full per-candidate evidence: --format jsonl"} {
+		if !strings.Contains(got, expected) {
+			t.Errorf("missing %q in output:\n%s", expected, got)
+		}
+	}
+	if strings.Count(got, "PROBE OBSERVATIONS") != 0 {
+		t.Fatal("multi-candidate text repeated full negative probe detail")
+	}
+}
+
+func TestMultipleCandidatesCollapseRedirectAlias(t *testing.T) {
+	first := mcprecon.Result{Target: mcprecon.Target{Input: "http://lab.test/mcp", Host: "lab.test", Port: 80, Scheme: "http"}, Services: []mcprecon.Service{{Endpoint: "/mcp", Detection: mcprecon.Detection{Status: "confirmed"}, MCP: mcprecon.MCP{Inventories: map[string]mcprecon.Collections{}}}}}
+	alias := mcprecon.Result{Target: mcprecon.Target{Input: "http://lab.test/mcp/", Host: "lab.test", Port: 80, Scheme: "http"}, Services: []mcprecon.Service{{Endpoint: "/mcp", Detection: mcprecon.Detection{Status: "confirmed"}, MCP: mcprecon.MCP{Inventories: map[string]mcprecon.Collections{}}}}}
+	var out bytes.Buffer
+	printResultsStyled(&out, []mcprecon.Result{first, alias}, false, false)
+	got := out.String()
+	if !strings.Contains(got, "MCP endpoints: 1 | aliases: 1") || !strings.Contains(got, "http://lab.test/mcp/ — MCP alias of http://lab.test/mcp") || strings.Count(got, "IDENTIFICATION") != 1 {
+		t.Fatalf("alias was not collapsed:\n%s", got)
 	}
 }
 

@@ -16,6 +16,108 @@ func printResult(w io.Writer, r mcprecon.Result, showSchemas bool) {
 	printResultStyled(w, r, showSchemas, false)
 }
 
+func printResultsStyled(w io.Writer, results []mcprecon.Result, showSchemas, color bool) {
+	if len(results) == 1 {
+		printResultStyled(w, results[0], showSchemas, color)
+		return
+	}
+	confirmed, inconclusive := 0, 0
+	canonical := map[string]int{}
+	aliases := map[int]int{}
+	for i, result := range results {
+		if resultConfirmed(result) {
+			key := confirmedEndpointKey(result)
+			if first, exists := canonical[key]; exists {
+				aliases[i] = first
+			} else {
+				canonical[key] = i
+				confirmed++
+			}
+		} else if len(result.Services) > 0 {
+			inconclusive++
+		}
+	}
+	fmt.Fprintf(w, "DISCOVERY SUMMARY  candidates: %d | MCP endpoints: %d | aliases: %d | inconclusive: %d | other: %d\n\n", len(results), confirmed, len(aliases), inconclusive, len(results)-confirmed-len(aliases)-inconclusive)
+	for i, result := range results {
+		if resultConfirmed(result) {
+			if _, alias := aliases[i]; alias {
+				continue
+			}
+			printResultStyled(w, result, showSchemas, color)
+		}
+	}
+	if confirmed < len(results) {
+		section(w, "OTHER CANDIDATES", color)
+		for i, result := range results {
+			if first, alias := aliases[i]; alias {
+				fmt.Fprintf(w, "  %s — MCP alias of %s\n", safeLine(result.Target.Input), safeLine(results[first].Target.Input))
+				continue
+			}
+			if resultConfirmed(result) {
+				continue
+			}
+			state := "MCP not confirmed"
+			if len(result.Services) > 0 {
+				state = "MCP " + statusLabel(result.Services[0].Detection.Status)
+			} else if result.ScanStatus == "failed" {
+				state = "probe failed"
+			}
+			outcome := bestProbeOutcome(result.Observations)
+			if outcome != "" {
+				state += " | " + outcome
+			}
+			fmt.Fprintf(w, "  %s — %s\n", safeLine(result.Target.Input), state)
+		}
+		fmt.Fprintln(w, "  Full per-candidate evidence: --format jsonl")
+		fmt.Fprintln(w)
+	}
+}
+
+func confirmedEndpointKey(result mcprecon.Result) string {
+	for _, service := range result.Services {
+		if service.Detection.Status == "confirmed" {
+			return fmt.Sprintf("%s://%s:%d%s", result.Target.Scheme, result.Target.Host, result.Target.Port, service.Endpoint)
+		}
+	}
+	return result.Target.Input
+}
+
+func resultConfirmed(result mcprecon.Result) bool {
+	for _, service := range result.Services {
+		if service.Detection.Status == "confirmed" {
+			return true
+		}
+	}
+	return false
+}
+
+func bestProbeOutcome(observations []mcprecon.Observation) string {
+	var chosen *mcprecon.Observation
+	for i := range observations {
+		obs := &observations[i]
+		if obs.Phase != "discovery" {
+			continue
+		}
+		if chosen == nil || (obs.HTTPStatus > 0 && obs.HTTPStatus != 404 && obs.HTTPStatus != 405 && (chosen.HTTPStatus == 0 || chosen.HTTPStatus == 404 || chosen.HTTPStatus == 405)) {
+			chosen = obs
+		}
+	}
+	if chosen == nil {
+		return ""
+	}
+	status := "no HTTP response"
+	if chosen.HTTPStatus > 0 {
+		status = fmt.Sprintf("HTTP %d", chosen.HTTPStatus)
+	}
+	if chosen.ErrorCode != "" {
+		status += " (" + safeLine(chosen.ErrorCode) + ")"
+	}
+	if chosen.HTTPServer != "" {
+		status += " | server: " + safeLine(chosen.HTTPServer)
+	}
+	return status
+}
+
 func printResultStyled(w io.Writer, r mcprecon.Result, showSchemas, color bool) {
 	fmt.Fprintf(w, "TARGET  %s\n", safeLine(r.Target.Input))
 	fmt.Fprintf(w, "Result: %s | %d requests | %d ms\n", statusLabel(r.ScanStatus), r.Metrics.Requests, r.Metrics.DurationMS)

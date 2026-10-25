@@ -41,12 +41,13 @@ func run(args []string, out, errout io.Writer) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(errout)
 	var urls, targets, paths values
-	var targetsFile, ports, tokenEnv, tokenFile, format, profile, pathProfile, colorMode string
+	var targetsFile, pathsFile, ports, tokenEnv, tokenFile, format, profile, pathProfile, colorMode string
 	var showSchemas bool
 	fs.Var(&urls, "url", "explicit MCP URL (repeatable)")
 	fs.Var(&targets, "target", "host or host:port (repeatable)")
 	fs.Var(&paths, "path", "candidate path for --target (repeatable)")
-	fs.StringVar(&pathProfile, "path-profile", "standard", "candidate paths for --target: standard or broad (overridden by --path)")
+	fs.StringVar(&pathsFile, "paths-file", "", "file with one candidate path per line; combines with --path and replaces the built-in profile")
+	fs.StringVar(&pathProfile, "path-profile", "standard", "candidate paths for --target: standard, broad, or extensive")
 	fs.StringVar(&targetsFile, "targets-file", "", "file with one host, host:port or URL per line")
 	fs.StringVar(&ports, "ports", "443,3000,8000,8080", "TCP ports for --target")
 	fs.StringVar(&tokenEnv, "token-env", "", "environment variable holding Bearer token")
@@ -84,8 +85,8 @@ func run(args []string, out, errout io.Writer) error {
 	if profile != "inventory" {
 		return errors.New("only inventory profile is implemented")
 	}
-	if pathProfile != "standard" && pathProfile != "broad" {
-		return errors.New("path-profile must be standard or broad")
+	if pathProfile != "standard" && pathProfile != "broad" && pathProfile != "extensive" {
+		return errors.New("path-profile must be standard, broad, or extensive")
 	}
 	if tokenEnv != "" && tokenFile != "" {
 		return errors.New("choose --token-env or --token-file")
@@ -110,9 +111,35 @@ func run(args []string, out, errout io.Writer) error {
 	cfg.Targets = targets
 	if pathProfile == "broad" {
 		cfg.Paths = mcprecon.BroadPaths()
+	} else if pathProfile == "extensive" {
+		cfg.Paths = mcprecon.ExtensivePaths()
+	}
+	if pathsFile != "" {
+		file, e := os.Open(pathsFile)
+		if e != nil {
+			return e
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 1024), 4096)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			paths = append(paths, line)
+			if len(paths) > 128 {
+				return errors.New("too many custom paths (maximum 128)")
+			}
+		}
+		if e := scanner.Err(); e != nil {
+			return e
+		}
 	}
 	if len(paths) > 0 {
 		cfg.Paths = paths
+	} else if pathsFile != "" {
+		return errors.New("paths file has no candidate paths")
 	}
 	parsed, e := parsePorts(ports)
 	if e != nil {
@@ -167,9 +194,7 @@ func run(args []string, out, errout io.Writer) error {
 		return nil
 	case "text":
 		color := terminalColorEnabled(colorMode, out)
-		for _, r := range results {
-			printResultStyled(out, r, showSchemas, color)
-		}
+		printResultsStyled(out, results, showSchemas, color)
 		return nil
 	default:
 		return errors.New("format must be text, json, or jsonl")
@@ -212,5 +237,5 @@ func parsePorts(s string) ([]int, error) {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum scan --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum scan --target host.example --ports 443,8000 [--path /mcp]\n\nRun mcpenum scan --help for all options.")
+	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum scan --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum scan --target host.example --ports 443,8000 [--path-profile extensive]\n  mcpenum scan --target host.example --paths-file paths.txt\n\nRun mcpenum scan --help for all options.")
 }

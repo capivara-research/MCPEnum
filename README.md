@@ -91,12 +91,38 @@ If you know the host but not the endpoint, use `--target` to try selected ports 
 
 If a candidate is not confirmed as MCP, the text report shows the discovery requests, HTTP status, error category, and any `Server` and `Content-Type` headers. For example, a missing path can show `server/discover: HTTP 404 ... | server: uvicorn`. These headers are self-reported clues about the HTTP service, not proof of its product or version. A failed candidate says nothing about other paths on the host.
 
-The standard path set is `/mcp`, `/`, `/sse`, `/api/mcp`, `/mcp/v1`, `/v1/mcp`, and `/messages`. For a wider search, use `--path-profile broad`: it tries 15 MCP-related paths. More paths produce more requests and more result rows. A repeated `--path` option replaces either built-in set with only the paths you name.
+The MCP specification requires an HTTP endpoint, but does not prescribe its path. Real deployments include [root and custom routes](https://github.com/modelcontextprotocol/csharp-sdk/blob/main/docs/concepts/stateless/stateless.md), [`/api/mcp`](https://learn.microsoft.com/azure/app-service/tutorial-ai-model-context-protocol-server-dotnet), and [`/api/v1/mcp`](https://github.com/NVIDIA/NeMo-Agent-Toolkit/blob/develop/docs/source/run-workflows/mcp-server.md). MCPEnum offers bounded candidate sets:
+
+| Path profile | Candidates per selected port | When to use |
+|---|---:|---|
+| `standard` (default) | 7 | Quick check of common roots and MCP/SSE routes. |
+| `broad` | 15 | More legacy and gateway-style routes. |
+| `extensive` | 27 | Additional nested, versioned, trailing-slash, and SSE routes. |
+
+The 27 paths are heuristics, not a standard or an exhaustive list. Each candidate can require two discovery POSTs, with an additional GET for an SSE fallback; confirmed endpoints also receive list requests. Generic web applications may log or handle those POSTs, so select only authorized hosts and paths. Larger profiles increase traffic and output. When two paths redirect to one MCP endpoint, text output marks the second as an alias; JSON keeps both candidate results and their redirect evidence. Use `--rate`, `--workers`, and time budgets when scanning many hosts.
 
 ```sh
 ./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile broad
+./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile extensive
 ./mcpenum scan --target 10.0.0.5 --ports 8000 --path /custom/mcp --path /rpc
 ```
+
+For a deployment with a custom prefix, provide a path file. Its entries and any repeated `--path` values replace the built-in profile; blank lines and `#` comments are ignored. A file is limited to 128 candidate paths, and each path must start with `/`.
+
+```text
+# paths.txt
+/tenant/notes/mcp
+/releasecommunications/mcp
+/team-a/sse
+```
+
+```sh
+./mcpenum scan --target 10.0.0.5 --ports 8000 --paths-file paths.txt
+```
+
+Legacy SSE fallback now applies to candidate paths ending in `/sse`, including `/api/sse` and `/mcp/sse`.
+
+A private prefix such as `/tenant/notes/mcp` cannot be inferred reliably from a host alone. Supply it with `--url`, `--path`, or `--paths-file` when known. The [AI Catalog discovery proposal](https://github.com/modelcontextprotocol/ext-server-card/blob/main/docs/discovery.md) is optional and draft, so MCPEnum does not assume a catalog exists.
 
 ## What MCPEnum looks for
 
@@ -253,6 +279,8 @@ The token file should contain the token itself, without a `Bearer ` prefix. Prot
 
 `json` prints one object for one target or an array for multiple targets. `jsonl` prints one object per target. Each result includes `schema_version`, `target`, `scan_status`, `services`, `observations`, and `metrics`. Collection objects include `status`, `pages`, `count`, `items`, and evidence IDs. Text and JSON describe the same scan; JSON retains more detail for automation.
 
+For scans with multiple candidate paths, terminal output starts with a discovery summary. Confirmed MCP endpoints retain their full inventory; unconfirmed paths appear as one-line HTTP clues under **OTHER CANDIDATES**. `--format jsonl` retains every candidate's full observations, including `resolved_path` when a same-origin redirect changed the endpoint path.
+
 ### Tune output and scan limits
 
 ```sh
@@ -271,7 +299,8 @@ The token file should contain the token itself, without a `Bearer ` prefix. Prot
 | `--targets-file FILE` | — | Read URLs or hosts, one per line. |
 | `--ports LIST` | `443,3000,8000,8080` | Comma-separated ports or short ranges for `--target`. |
 | `--path PATH` | Seven standard paths | Candidate path for `--target`; repeatable and replaces the path profile. |
-| `--path-profile` | `standard` | `standard` (7 paths) or `broad` (15 paths) for `--target`. |
+| `--paths-file FILE` | — | Read candidate paths, one per line; combines with `--path` and replaces the profile. |
+| `--path-profile` | `standard` | `standard` (7), `broad` (15), or `extensive` (27) candidate paths for `--target`. |
 | `--format` | `text` | `text`, `json`, or `jsonl`. |
 | `--color` | `auto` | `auto`, `always`, or `never` for text output. `NO_COLOR` is respected in auto mode. |
 | `--schemas` | off | Include full tool input schemas in text output. |
