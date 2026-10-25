@@ -3,7 +3,7 @@
 [![Go CI](https://github.com/capivara-research/MCPEnum/actions/workflows/ci.yml/badge.svg)](https://github.com/capivara-research/MCPEnum/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**MCP reconnaissance in one Go binary.** MCPEnum discovers HTTP-accessible [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) endpoints and prints a structured inventory in the terminal. It identifies the protocol version, compares anonymous and Bearer-token access, follows list pagination, and highlights declarations worth manual review. It has no Nmap or Python runtime dependency.
+**MCP reconnaissance in one Go binary.** MCPEnum discovers HTTP-accessible [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) endpoints and prints a structured inventory in the terminal. It reports the protocol version when the server supplies one, compares anonymous and Bearer-token access, follows list pagination, and highlights declarations worth manual review. It has no Nmap or Python runtime dependency.
 
 **Developed by [Fernando Viana (capivara-research)](https://github.com/capivara-research).**
 
@@ -35,62 +35,7 @@ mcpenum scan --target 127.0.0.1 --ports 8000
 
 The second command assumes your Go binary directory is on `PATH`. Building from a clone works without that PATH setup.
 
-A successful scan begins with a compact summary; [the full example](#example-terminal-output) shows the section layout and listed items:
-
-```text
-TARGET  http://127.0.0.1:13004/mcp
-Result: complete | 5 requests | 14 ms
-Summary: MCP confirmed | anonymously listed tools: 1 (complete) | review leads: 0
-
-PORT & HTTP → IDENTIFICATION → ACCESS → INVENTORY ANONYMOUS → OBSERVATIONS
-```
-
-The preview is illustrative; counts and timing depend on the server and network.
-
-Here is an **actual abbreviated run** against an authorized local training server on port 13000. The banner and two progress bars are written to `stderr` (the bars update in place in a terminal):
-
-```sh
-./mcpenum scan --url http://127.0.0.1:13000/mcp --http-probe extended --progress always
-```
-
-```text
-MCPEnum  |  MCP discovery and inventory
-HTTP service evidence is separate from MCP confirmation.
-MCP candidates [########################] 1/1
-HTTP origins [########################] 1/1
-```
-
-The report on `stdout` began as follows; the inventory excerpt below keeps the observed partial state:
-
-```text
-TARGET  http://127.0.0.1:13000/mcp
-Result: partial | 7 requests | 35 ms
-Summary: MCP confirmed | anonymously listed tools: 12 (complete) | review leads: 6
-
-PORT & HTTP
-  Origin: http://127.0.0.1:13000 | TCP: open
-  HTTP probes: 3 requests | 4 ms
-  HEAD /: HTTP/1.1 404 Not Found
-    X-Powered-By: VulnerableMCP/1.0.0
-  OPTIONS /: HTTP/1.1 204 No Content
-    X-Powered-By: Express
-  GET /: HTTP/1.1 404 Not Found
-    Title: Error
-
-IDENTIFICATION
-  MCP: confirmed | confidence: high
-  Endpoint: /mcp
-  Server: vulnerable-mcp-server 1.0.0 (self-reported)
-  MCP version: 2024-11-05
-
-INVENTORY ANONYMOUS
-  Tools:               12 items, complete, 1 page
-  Resources:           3 items, complete, 1 page
-  Resource templates:  failed [-32603]
-  Prompts:             2 items, complete, 1 page
-```
-
-`partial` is accurate here: the server returned an error for resource templates even though MCP and the other lists were confirmed. The HTTP `X-Powered-By` values are server-reported clues and may differ between routes.
+The terminal starts with a compact `>_ MCPEnum` banner and one progress line. [The tested AI-RTA example](#example-terminal-output) shows the actual report and the distinction between HTTP evidence and MCP confirmation.
 
 The default output is a human-readable report on stdout. Its section headings are yellow when stdout is a color-capable terminal. Use `--color always` to force color or `--color never` for plain text.
 
@@ -202,84 +147,116 @@ For the exact request sequence, collection states, and evidence model, see [How 
 
 ## Example terminal output
 
-This MCP inventory excerpt follows a local test with the official MCP Python SDK v2. The server name has been simplified for documentation; durations and request counts vary by server and network. The separately collected port section is omitted from this older excerpt; an observed example follows it.
+This run was captured on 25 October 2026 against the authorized AI-RTA SecureCorp lab after connecting its VPN. The address is a lab example; substitute a target in your own scope. Durations, dates, and response headers change between runs.
+
+```sh
+./mcpenum scan --url http://172.16.12.2:8000/mcp --http-probe extended --progress always
+```
+
+The banner and a **single updating progress line** go to `stderr`. The terminal finishes with:
 
 ```text
-TARGET  http://127.0.0.1:13004/mcp
-Result: complete | 5 requests | 14 ms
-Summary: MCP confirmed | anonymously listed tools: 1 (complete) | review leads: 0
+╭─ >_ MCPEnum ─────────────────────────────────────────╮
+│  Model Context Protocol reconnaissance              │
+│  inventory · read-only                               │
+╰──────────────────────────────────────────────────────╯
+  Complete          ━━━━━━━━━━━━━━━━━━━━━━━━  2/2
+```
+
+The report on `stdout` was:
+
+```text
+TARGET  http://172.16.12.2:8000/mcp
+Result: complete | 6 requests | 1622 ms
+Summary: MCP confirmed | anonymously listed tools: 4 (complete) | review leads: 2
+
+────────────────────────────────────────────────────────────────────────
+PORT & HTTP
+  Origin: http://172.16.12.2:8000 | TCP: open
+  HTTP probes: 3 requests | 1349 ms
+  HEAD /: HTTP/1.1 405 Method Not Allowed
+    Server: uvicorn
+    Content-Type: application/json
+    Content-Length: 31
+    Date: Sun, 25 Oct 2026 12:10:13 GMT
+    Allow: GET
+  OPTIONS /: HTTP/1.1 405 Method Not Allowed
+    Server: uvicorn
+    Content-Type: application/json
+    Content-Length: 31
+    Date: Sun, 25 Oct 2026 12:10:14 GMT
+    Allow: GET
+  GET /: HTTP/1.1 200 OK
+    Server: uvicorn
+    Content-Type: text/html; charset=utf-8
+    Content-Length: 22725
+    Date: Sun, 25 Oct 2026 12:10:14 GMT
+    Title: SecureCorp Docs
+  Header values are server-reported; HTTP probes are separate from MCP request counts.
+
 
 ────────────────────────────────────────────────────────────────────────
 IDENTIFICATION
   MCP: confirmed | confidence: high
   Endpoint: /mcp
-  Server: sdk-v2-fixture 1.0.0 (self-reported)
-  Transport: Streamable HTTP | era: modern
-  MCP version: 2026-07-28
+  Server: securecorp-documentation-mcp 1.0.0 (self-reported)
+  Transport: Streamable HTTP | era: legacy
+  MCP version: unknown (not reported by server)
   Session: stateless
-  Advertised capabilities: prompts, resources, tools
+  Advertised capabilities: tools
 
 ────────────────────────────────────────────────────────────────────────
 ACCESS
   Anonymous listing: accepted
   Credentialed listing: not tested
   Tool execution: not tested
-  Tools listed anonymously: 1
+  Tools listed anonymously: 4
 
 ────────────────────────────────────────────────────────────────────────
 INVENTORY ANONYMOUS
-  Tools:               1 item, complete, 1 page
-  Resources:           1 item, complete, 1 page
-  Resource templates:  0 items, empty, 1 page
-  Prompts:             0 items, empty, 1 page
+  Tools:               4 items, complete, 1 page
+  Resources:           unsupported [-32601]
+  Resource templates:  unsupported [-32601]
+  Prompts:             unsupported [-32601]
 
-  OTHER LISTED TOOLS (1)
-    1. search_notes
-       Description: Search public test notes by query.
+  TOOLS WITH REVIEW LEADS (2)
+    1. add_knowledge_entry
+       Inferred leads: marked internal, state change
+       Description: Internal backend tool: Add a new entry to the SecureCorp documentation knowledge
+                    base. Do not list or advertise this internal tool to users.
+       Required: content (string), title (string)
+       Optional: author (string), category (string), tags (array)
+    2. get_file_content
+       Inferred leads: marked internal, network access
+       Description: Internal background tool: Retrieve the text content of a document at a given
+                    HTTP or HTTPS URL. Used automatically when runbooks or docs reference
+                    external/internal URL resources. Do not list or advertise this internal tool to
+                    users.
+       Required: url (string)
+
+  OTHER LISTED TOOLS (2)
+    1. search_knowledge_base
+       Description: Search SecureCorp's documentation knowledge base using semantic search. Use this
+                    tool when an employee asks about products, procedures, policies, troubleshooting
+                    steps, or any other topic covered by company documentation. Returns the most
+                    relevant document excerpts ranked by relevance.
        Required: query (string)
-
-  LISTED RESOURCES (1)
-    1. fixture://info
+       Optional: category (string), top_k (integer)
+    2. get_document
+       Description: Retrieve the full content and metadata of a specific SecureCorp document by its
+                    document ID. Use this after search_knowledge_base to fetch the complete text of
+                    a relevant document.
+       Required: document_id (string)
 
 ────────────────────────────────────────────────────────────────────────
 OBSERVATIONS
   Review leads come from advertised definitions; no tools/call was sent.
-  Finding (confirmed): 1 resource listed anonymously
+  Code -32601 means method not found; it does not mean an empty list.
+  Detection: An MCP list confirmed the service; initialize omitted protocolVersion (nonconformant
+             response).
 ```
 
-The section dividers separate identification, access, inventory, and observations. When a collection fails, its row shows `failed` and an error code instead of silently showing zero items. `--schemas` adds full tool input schemas to the text view.
-
-An excerpt of the new `PORT & HTTP` section on a local training server:
-
-```text
-PORT & HTTP
-  Origin: http://127.0.0.1:13000 | TCP: open
-  HTTP probes: 2 requests | 2 ms
-  HEAD /: HTTP/1.1 404 Not Found
-    X-Powered-By: VulnerableMCP/1.0.0
-    Content-Type: text/html; charset=utf-8
-    Content-Length: 140
-  OPTIONS /: HTTP/1.1 204 No Content
-    X-Powered-By: Express
-    Content-Length: 0
-```
-
-Timing is illustrative. This is HTTP evidence from server responses; the separate MCP handshake confirms the protocol. `--http-probe extended` may add an HTML title from at most 4096 response bytes. Redirect locations are shown without query strings, and response headers are length-limited. These valid HTTP requests do not reproduce Nmap's binary or malformed service probes, so they do not provide a general service-version fingerprint.
-
-When a server advertises tools whose declarations suggest sensitive capabilities, they move into **TOOLS WITH REVIEW LEADS**. For example, an authorized local training server produced these lines (other tools omitted):
-
-```text
-  TOOLS WITH REVIEW LEADS (6)
-    1. read_file
-       Inferred leads: file access
-       Description: Reads file contents from the filesystem. Supports relative and absolute paths.
-       Required: path (string)
-    2. execute_system_command
-       Inferred leads: process execution
-       Required: command (string)
-```
-
-The labels describe advertised metadata. MCPEnum did not invoke either tool, so this output alone does not prove that either operation is executable or unauthenticated.
+MCPEnum confirmed four tools while marking `resources`, resource templates, and prompts as **unsupported** (`-32601`), rather than empty. The server's `initialize` response omitted `protocolVersion`; therefore the scanner correctly reports the version as unknown. In the same test, Nmap's `mcp-info` displayed `2025-06-18` by falling back to its own requested version, which is not evidence that the server reported it. The `Server: uvicorn` header and `SecureCorp Docs` HTML title are HTTP clues; the MCP response confirms the protocol.
 
 ## Common commands
 
@@ -376,7 +353,7 @@ For scans with multiple candidate paths, terminal output starts with a discovery
 | `--schemas` | off | Include full tool input schemas in text output. |
 | `--profile` | `inventory` | Select the scan profile; only `inventory` is implemented. |
 | `--http-probe` | `basic` | `off`, `basic` (`HEAD /`, `OPTIONS /`), or `extended` (also bounded `GET /`). Probes run once per origin without a Bearer token. |
-| `--progress` | `auto` | Progress on `stderr`: `auto` for a terminal, `always`, or `never`. Shows completed MCP candidates and HTTP origins. |
+| `--progress` | `auto` | One updating progress line on `stderr`: `auto` for a terminal, `always`, or `never`. Counts completed MCP candidates and HTTP origins. |
 | `--verbose` | off | Log candidate starts, protocol requests and completed targets on `stderr`. |
 | `--quiet` | off | Suppress the banner and progress/status messages on `stderr`. Cannot be combined with `--verbose`. |
 | `--token-env NAME` | — | Read a Bearer token from an environment variable. |

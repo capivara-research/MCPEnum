@@ -11,12 +11,13 @@ import (
 )
 
 type scanReporter struct {
-	mu       sync.Mutex
-	out      io.Writer
-	progress bool
-	verbose  bool
-	active   bool
-	phase    string
+	mu        sync.Mutex
+	out       io.Writer
+	progress  bool
+	verbose   bool
+	active    bool
+	completed int
+	total     int
 }
 
 func newScanReporter(out io.Writer, progressMode string, verbose, quiet bool) *scanReporter {
@@ -27,8 +28,10 @@ func newScanReporter(out io.Writer, progressMode string, verbose, quiet bool) *s
 	}
 	r := &scanReporter{out: out, progress: showBar && !verbose, verbose: verbose}
 	if !quiet {
-		fmt.Fprintln(out, "MCPEnum  |  MCP discovery and inventory")
-		fmt.Fprintln(out, "HTTP service evidence is separate from MCP confirmation.")
+		fmt.Fprintln(out, "╭─ >_ MCPEnum ─────────────────────────────────────────╮")
+		fmt.Fprintln(out, "│  Model Context Protocol reconnaissance              │")
+		fmt.Fprintln(out, "│  inventory · read-only                               │")
+		fmt.Fprintln(out, "╰──────────────────────────────────────────────────────╯")
 	}
 	return r
 }
@@ -45,39 +48,55 @@ func writerIsTerminal(out io.Writer) bool {
 func (r *scanReporter) event(ev mcprecon.ProgressEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if ev.Phase == "request" || ev.Phase == "start" {
+	switch ev.Phase {
+	case "total":
+		r.total = ev.Total
+		r.completed = 0
+		return
+	case "request", "start":
 		if r.verbose {
 			fmt.Fprintf(r.out, "%s  %s | %s\n", strings.ToUpper(ev.Phase), safeLine(ev.Target), safeLine(ev.Status))
 		}
 		return
-	}
-	if r.active && ev.Phase != r.phase {
-		fmt.Fprintln(r.out)
-		r.active = false
-	}
-	r.phase = ev.Phase
-	label := "MCP candidates"
-	if ev.Phase == "http" {
-		label = "HTTP origins"
-	}
-	if r.verbose && ev.Done > 0 {
-		fmt.Fprintf(r.out, "%s [%d/%d] %s: %s\n", label, ev.Done, ev.Total, safeLine(ev.Target), safeLine(ev.Status))
-	}
-	if r.progress {
-		width := 24
-		filled := 0
-		if ev.Total > 0 {
-			filled = ev.Done * width / ev.Total
+	case "mcp", "http":
+		if ev.Done == 0 {
+			if r.progress && !r.active {
+				r.draw("Preparing scan")
+			}
+			return
 		}
-		fmt.Fprintf(r.out, "\r%s [%s%s] %d/%d", label, strings.Repeat("#", filled), strings.Repeat("-", width-filled), ev.Done, ev.Total)
-		r.active = true
+		r.completed++
+		label := "Discovering MCP"
+		if ev.Phase == "http" {
+			label = "Inspecting HTTP"
+		}
+		if r.verbose {
+			fmt.Fprintf(r.out, "%s  %d/%d | %s: %s\n", label, r.completed, r.total, safeLine(ev.Target), safeLine(ev.Status))
+		}
+		if r.progress {
+			r.draw(label)
+		}
 	}
+}
+
+func (r *scanReporter) draw(label string) {
+	const width = 24
+	filled := 0
+	if r.total > 0 {
+		filled = r.completed * width / r.total
+	}
+	if filled > width {
+		filled = width
+	}
+	fmt.Fprintf(r.out, "\r  %-17s %s%s  %d/%d  ", label, strings.Repeat("━", filled), strings.Repeat("─", width-filled), r.completed, r.total)
+	r.active = true
 }
 
 func (r *scanReporter) finish() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.active {
+		r.draw("Complete")
 		fmt.Fprintln(r.out)
 		r.active = false
 	}

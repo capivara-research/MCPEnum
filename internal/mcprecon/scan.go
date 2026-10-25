@@ -59,6 +59,16 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	var wg sync.WaitGroup
 	var completed atomic.Int64
 	if cfg.Progress != nil {
+		total := len(urls)
+		if cfg.HTTPProbe != "off" {
+			origins := map[string]bool{}
+			for _, raw := range urls {
+				u, _ := url.Parse(raw)
+				origins[u.Scheme+"://"+u.Host] = true
+			}
+			total += len(origins)
+		}
+		cfg.Progress(ProgressEvent{Phase: "total", Done: 0, Total: total})
 		cfg.Progress(ProgressEvent{Phase: "mcp", Done: 0, Total: len(urls)})
 	}
 	for i := 0; i < cfg.Workers && i < len(urls); i++ {

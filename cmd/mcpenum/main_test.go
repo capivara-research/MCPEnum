@@ -124,8 +124,8 @@ func TestProgressAndVerboseKeepJSONMachineReadable(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"progress", []string{"--progress", "always"}, "MCP candidates ["},
-		{"verbose", []string{"--verbose"}, "[1/1]"},
+		{"progress", []string{"--progress", "always"}, "Complete"},
+		{"verbose", []string{"--verbose"}, "Discovering MCP"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errout bytes.Buffer
@@ -137,7 +137,7 @@ func TestProgressAndVerboseKeepJSONMachineReadable(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 				t.Fatalf("stdout is not valid JSON: %v; output=%q", err, out.String())
 			}
-			if !strings.Contains(errout.String(), "MCPEnum") || !strings.Contains(errout.String(), tc.want) {
+			if !strings.Contains(errout.String(), "╭─ >_ MCPEnum") || !strings.Contains(errout.String(), tc.want) {
 				t.Fatalf("missing banner or status on stderr: %q", errout.String())
 			}
 			if tc.name == "verbose" && !strings.Contains(errout.String(), "REQUEST") {
