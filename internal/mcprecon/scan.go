@@ -18,8 +18,13 @@ import (
 	"time"
 )
 
+var standardPaths = []string{"/mcp", "/", "/sse", "/api/mcp", "/mcp/v1", "/v1/mcp", "/messages"}
+var broadPaths = []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
+
+func BroadPaths() []string { return append([]string(nil), broadPaths...) }
+
 func Defaults() Config {
-	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: []string{"/mcp", "/api/mcp", "/sse"}, Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0"}
+	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: append([]string(nil), standardPaths...), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0"}
 }
 
 func Scan(ctx context.Context, cfg Config) ([]Result, error) {

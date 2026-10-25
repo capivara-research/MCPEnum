@@ -24,7 +24,7 @@ go build -o mcpenum ./cmd/mcpenum
 ./mcpenum scan --target 127.0.0.1 --ports 8000
 ```
 
-Replace `127.0.0.1` and `8000` with an authorized host and port. This command tries the default paths `/mcp`, `/api/mcp`, and `/sse` on that port. It does not discover arbitrary paths. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
+Replace `127.0.0.1` and `8000` with an authorized host and port. This command tries seven common MCP paths on that port, including `/mcp`, `/`, and `/sse`. It does not discover arbitrary paths. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
 
 An alternative installation, verified against this repository, is:
 
@@ -89,7 +89,14 @@ If you know the host but not the endpoint, use `--target` to try selected ports 
 
 `--target` tests each selected port/path combination; `--url` does **not** search alternate paths. Neither mode discovers arbitrary paths or ports. A normal web API, incorrect path, unreachable port, unsupported stdio-only server, or access control that prevents confirmation cannot produce a valid MCP inventory. See [result states](#reading-the-results-correctly) before interpreting an empty report.
 
-If a candidate is not confirmed as MCP, the text report shows the discovery requests and observed HTTP status or error category. For example, a missing path can show `server/discover: HTTP 404` and `initialize: HTTP 404`. This is evidence about that candidate path, not a conclusion about every path on the host. Use `--path` to add a custom path within your authorized scope.
+If a candidate is not confirmed as MCP, the text report shows the discovery requests, HTTP status, error category, and any `Server` and `Content-Type` headers. For example, a missing path can show `server/discover: HTTP 404 ... | server: uvicorn`. These headers are self-reported clues about the HTTP service, not proof of its product or version. A failed candidate says nothing about other paths on the host.
+
+The standard path set is `/mcp`, `/`, `/sse`, `/api/mcp`, `/mcp/v1`, `/v1/mcp`, and `/messages`. For a wider search, use `--path-profile broad`: it tries 15 MCP-related paths. More paths produce more requests and more result rows. A repeated `--path` option replaces either built-in set with only the paths you name.
+
+```sh
+./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile broad
+./mcpenum scan --target 10.0.0.5 --ports 8000 --path /custom/mcp --path /rpc
+```
 
 ## What MCPEnum looks for
 
@@ -200,7 +207,7 @@ An explicit `--url` probes only that URL. If the path is omitted, `/mcp` is used
 ./mcpenum scan --target mcp.example.test --ports 443,8000 --path /mcp --path /api/mcp
 ```
 
-With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; default paths are `/mcp`, `/api/mcp`, and `/sse`. Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters.
+With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the seven standard paths are listed [above](#choosing-an-ip-and-endpoint). Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
 
 ### Scan multiple authorized targets
 
@@ -263,7 +270,8 @@ The token file should contain the token itself, without a `Bearer ` prefix. Prot
 | `--target HOST[:PORT]` | — | Expand host with selected ports and paths; repeatable. |
 | `--targets-file FILE` | — | Read URLs or hosts, one per line. |
 | `--ports LIST` | `443,3000,8000,8080` | Comma-separated ports or short ranges for `--target`. |
-| `--path PATH` | `/mcp`, `/api/mcp`, `/sse` | Candidate path for `--target`; repeatable. |
+| `--path PATH` | Seven standard paths | Candidate path for `--target`; repeatable and replaces the path profile. |
+| `--path-profile` | `standard` | `standard` (7 paths) or `broad` (15 paths) for `--target`. |
 | `--format` | `text` | `text`, `json`, or `jsonl`. |
 | `--color` | `auto` | `auto`, `always`, or `never` for text output. `NO_COLOR` is respected in auto mode. |
 | `--schemas` | off | Include full tool input schemas in text output. |
@@ -314,7 +322,7 @@ The JSON output uses `schema_version: "2.0"` and `scanner: "mcpenum"`. Its princ
 | `services[].mcp.inventories.anonymous` | Four list results from the anonymous context. |
 | `services[].mcp.inventories.credentialed` | Four list results when a Bearer token was provided. |
 | `services[].findings` | Confirmed exposure observations and inferred review leads. |
-| `observations` | Method, phase, path, HTTP/JSON-RPC status, timing, and size for each request. |
+| `observations` | Method, phase, path, HTTP/JSON-RPC status, bounded `Server` and `Content-Type` headers, timing, and size for each request. |
 | `metrics` | Request count, elapsed time, connection count, and bytes received. |
 
 Each finding and collection refers to relevant observations through `evidence_ids`. This lets an integration trace a conclusion back to the requests that produced it. The scanner does not include Bearer tokens or session ID values in output.

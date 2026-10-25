@@ -52,6 +52,12 @@ func printUnconfirmed(w io.Writer, observations []mcprecon.Observation, color bo
 		} else if obs.RPCCode != 0 {
 			outcome += fmt.Sprintf(" (JSON-RPC %d)", obs.RPCCode)
 		}
+		if obs.HTTPServer != "" {
+			outcome += " | server: " + safeLine(obs.HTTPServer)
+		}
+		if obs.ContentType != "" {
+			outcome += " | content-type: " + safeLine(obs.ContentType)
+		}
 		fmt.Fprintf(w, "  %s: %s\n", safeLine(obs.Method), outcome)
 	}
 	fmt.Fprintln(w, "  Next: check the scheme and port; try authorized alternate paths with --target or --path.")

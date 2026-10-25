@@ -270,7 +270,7 @@ func (c *client) record(method, phase string, reply wireReply) {
 	if strings.HasPrefix(method, "notifications/") && reply.HTTPStatus >= 200 && reply.HTTPStatus < 300 {
 		status = "absent"
 	}
-	o := Observation{ID: id, Phase: phase, Method: method, Path: c.endpoint.EscapedPath(), HTTPStatus: reply.HTTPStatus, RPCStatus: status, ElapsedMS: reply.ElapsedMS, BytesReceived: reply.Bytes}
+	o := Observation{ID: id, Phase: phase, Method: method, Path: c.endpoint.EscapedPath(), HTTPStatus: reply.HTTPStatus, HTTPServer: boundedHeader(reply.Headers.Get("Server")), ContentType: boundedHeader(reply.Headers.Get("Content-Type")), RPCStatus: status, ElapsedMS: reply.ElapsedMS, BytesReceived: reply.Bytes}
 	if reply.RPC.Error != nil {
 		o.RPCCode = reply.RPC.Error.Code
 	}
@@ -280,6 +280,13 @@ func (c *client) record(method, phase string, reply wireReply) {
 	c.result.Observations = append(c.result.Observations, o)
 	c.result.Metrics.Requests++
 	c.result.Metrics.BytesReceived += reply.Bytes
+}
+
+func boundedHeader(value string) string {
+	if len(value) > 256 {
+		return value[:256]
+	}
+	return value
 }
 
 func (c *client) startLegacySSE(ctx context.Context) error {

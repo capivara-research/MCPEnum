@@ -113,6 +113,8 @@ type Observation struct {
 	Method        string `json:"method"`
 	Path          string `json:"path,omitempty"`
 	HTTPStatus    int    `json:"http_status,omitempty"`
+	HTTPServer    string `json:"http_server,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
 	RPCStatus     string `json:"rpc_status,omitempty"`
 	RPCCode       int    `json:"rpc_code,omitempty"`
 	ErrorCode     string `json:"error_code,omitempty"`

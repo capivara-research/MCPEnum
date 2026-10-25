@@ -28,6 +28,56 @@ func rpcErrorResponse(w http.ResponseWriter, id, code int) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": "unsupported"}})
 }
 
+func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
+	cfg := Defaults()
+	cfg.Targets = []string{"127.0.0.1:8000"}
+	urls, err := expandTargets(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"http://127.0.0.1:8000/mcp", "http://127.0.0.1:8000/", "http://127.0.0.1:8000/messages"} {
+		if !containsURL(urls, expected) {
+			t.Errorf("standard discovery missing %s", expected)
+		}
+	}
+	cfg.Paths = BroadPaths()
+	urls, err = expandTargets(cfg)
+	if err != nil || !containsURL(urls, "http://127.0.0.1:8000/rpc") {
+		t.Fatalf("broad discovery missing /rpc: %v", err)
+	}
+}
+
+func containsURL(urls []string, want string) bool {
+	for _, candidate := range urls {
+		if candidate == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestNonMCPResponseKeepsHTTPFingerprint(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "fixture-http")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("not found"))
+	}))
+	defer s.Close()
+	cfg := Defaults()
+	cfg.URLs = []string{s.URL + "/wrong"}
+	results, err := Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || len(results[0].Services) != 0 || len(results[0].Observations) != 2 {
+		t.Fatalf("unexpected non-MCP result: %+v", results)
+	}
+	if got := results[0].Observations[0].HTTPServer; got != "fixture-http" {
+		t.Fatalf("HTTP server header = %q", got)
+	}
+}
+
 func TestModernPaginationAndEvidence(t *testing.T) {
 	var mu sync.Mutex
 	var methods []string

@@ -41,11 +41,12 @@ func run(args []string, out, errout io.Writer) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(errout)
 	var urls, targets, paths values
-	var targetsFile, ports, tokenEnv, tokenFile, format, profile, colorMode string
+	var targetsFile, ports, tokenEnv, tokenFile, format, profile, pathProfile, colorMode string
 	var showSchemas bool
 	fs.Var(&urls, "url", "explicit MCP URL (repeatable)")
 	fs.Var(&targets, "target", "host or host:port (repeatable)")
 	fs.Var(&paths, "path", "candidate path for --target (repeatable)")
+	fs.StringVar(&pathProfile, "path-profile", "standard", "candidate paths for --target: standard or broad (overridden by --path)")
 	fs.StringVar(&targetsFile, "targets-file", "", "file with one host, host:port or URL per line")
 	fs.StringVar(&ports, "ports", "443,3000,8000,8080", "TCP ports for --target")
 	fs.StringVar(&tokenEnv, "token-env", "", "environment variable holding Bearer token")
@@ -83,6 +84,9 @@ func run(args []string, out, errout io.Writer) error {
 	if profile != "inventory" {
 		return errors.New("only inventory profile is implemented")
 	}
+	if pathProfile != "standard" && pathProfile != "broad" {
+		return errors.New("path-profile must be standard or broad")
+	}
 	if tokenEnv != "" && tokenFile != "" {
 		return errors.New("choose --token-env or --token-file")
 	}
@@ -104,6 +108,9 @@ func run(args []string, out, errout io.Writer) error {
 	}
 	cfg.URLs = urls
 	cfg.Targets = targets
+	if pathProfile == "broad" {
+		cfg.Paths = mcprecon.BroadPaths()
+	}
 	if len(paths) > 0 {
 		cfg.Paths = paths
 	}

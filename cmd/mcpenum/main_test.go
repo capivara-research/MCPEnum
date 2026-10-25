@@ -68,14 +68,14 @@ func TestTerminalUnconfirmedShowsProbeEvidence(t *testing.T) {
 		Target:     mcprecon.Target{Input: "http://lab.test/not-mcp"},
 		ScanStatus: "completed",
 		Observations: []mcprecon.Observation{
-			{Phase: "discovery", Method: "server/discover", HTTPStatus: 404, ErrorCode: "unexpected_content_type"},
+			{Phase: "discovery", Method: "server/discover", HTTPStatus: 404, HTTPServer: "uvicorn", ContentType: "text/plain", ErrorCode: "unexpected_content_type"},
 			{Phase: "discovery", Method: "initialize", HTTPStatus: 404, ErrorCode: "unexpected_content_type"},
 		},
 	}
 	var out bytes.Buffer
 	printResult(&out, result, false)
 	got := out.String()
-	for _, expected := range []string{"Summary: MCP not confirmed", "PROBE OBSERVATIONS", "server/discover: HTTP 404 (unexpected_content_type)", "initialize: HTTP 404 (unexpected_content_type)", "try authorized alternate paths"} {
+	for _, expected := range []string{"Summary: MCP not confirmed", "PROBE OBSERVATIONS", "server/discover: HTTP 404 (unexpected_content_type) | server: uvicorn | content-type: text/plain", "initialize: HTTP 404 (unexpected_content_type)", "try authorized alternate paths"} {
 		if !strings.Contains(got, expected) {
 			t.Errorf("missing %q in output:\n%s", expected, got)
 		}
