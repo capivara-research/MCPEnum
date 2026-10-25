@@ -42,7 +42,8 @@ func run(args []string, out, errout io.Writer) error {
 	fs.SetOutput(errout)
 	var urls, targets, paths values
 	var targetsFile, pathsFile, ports, tokenEnv, tokenFile, format, profile, pathProfile, colorMode string
-	var showSchemas bool
+	var showSchemas, verbose, quiet bool
+	var progressMode string
 	fs.Var(&urls, "url", "explicit MCP URL (repeatable)")
 	fs.Var(&targets, "target", "host or host:port (repeatable)")
 	fs.Var(&paths, "path", "candidate path for --target (repeatable)")
@@ -55,7 +56,11 @@ func run(args []string, out, errout io.Writer) error {
 	fs.StringVar(&format, "format", "text", "text, json, or jsonl")
 	fs.StringVar(&colorMode, "color", "auto", "terminal colors: auto, always, or never (text only)")
 	fs.BoolVar(&showSchemas, "schemas", false, "show full tool input schemas in text output")
+	fs.BoolVar(&verbose, "verbose", false, "show each completed candidate on stderr")
+	fs.BoolVar(&quiet, "quiet", false, "suppress banner and scan progress")
+	fs.StringVar(&progressMode, "progress", "auto", "progress on stderr: auto, always, or never")
 	fs.StringVar(&profile, "profile", "inventory", "scan profile (inventory)")
+	fs.StringVar(&cfg.HTTPProbe, "http-probe", cfg.HTTPProbe, "HTTP port metadata: off, basic (HEAD and OPTIONS), or extended (also bounded GET)")
 	fs.StringVar(&cfg.UserAgent, "user-agent", cfg.UserAgent, "HTTP User-Agent for traffic identification")
 	fs.IntVar(&cfg.Timeout, "timeout-ms", cfg.Timeout, "per-request timeout in milliseconds")
 	fs.IntVar(&cfg.Budget, "budget-ms", cfg.Budget, "per-endpoint budget in milliseconds")
@@ -78,6 +83,12 @@ func run(args []string, out, errout io.Writer) error {
 	}
 	if format != "text" && format != "json" && format != "jsonl" {
 		return errors.New("format must be text, json, or jsonl")
+	}
+	if progressMode != "auto" && progressMode != "always" && progressMode != "never" {
+		return errors.New("progress must be auto, always, or never")
+	}
+	if quiet && verbose {
+		return errors.New("--quiet and --verbose cannot be combined")
 	}
 	if colorMode != "auto" && colorMode != "always" && colorMode != "never" {
 		return errors.New("color must be auto, always, or never")
@@ -172,7 +183,10 @@ func run(args []string, out, errout io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	reporter := newScanReporter(errout, progressMode, verbose, quiet)
+	cfg.Progress = reporter.event
 	results, e := mcprecon.Scan(ctx, cfg)
+	reporter.finish()
 	if e != nil {
 		return e
 	}

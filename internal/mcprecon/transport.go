@@ -270,6 +270,13 @@ func readSSEMessage(r io.Reader, id int64, limit int64) ([]byte, int64, error) {
 }
 
 func (c *client) record(method, phase string, reply wireReply) {
+	if c.config.Progress != nil {
+		status := "no HTTP response"
+		if reply.HTTPStatus > 0 {
+			status = fmt.Sprintf("HTTP %d", reply.HTTPStatus)
+		}
+		c.config.Progress(ProgressEvent{Phase: "request", Target: c.endpoint.String(), Status: method + ": " + status})
+	}
 	id := fmt.Sprintf("e%d", len(c.result.Observations)+1)
 	status := "invalid"
 	if reply.Err == nil && reply.RPC.JSONRPC == "2.0" {

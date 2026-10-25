@@ -8,6 +8,8 @@ This document explains what a default `mcpenum scan` does on the wire and how to
 
 Each endpoint receives its own time budget. Multiple endpoints can run concurrently, bounded by `--workers`. `--rate` caps aggregate HTTP request rate across the scan.
 
+After MCP collection, the default `basic` HTTP profile sends `HEAD /` and `OPTIONS /` once per origin, shared across all candidate paths on that host, scheme, and port. `--http-probe extended` also sends `GET /` with `Range: bytes=0-4095`, reads at most 4096 bytes, and extracts an HTML title when present. `--http-probe off` skips this phase. Each probe has a maximum 1500 ms timeout (or the lower configured request timeout), a 16 KiB response-header cap, and no redirect following. The configured Bearer token is not sent. Redirect query strings are removed from reported locations. `port_info` reports the HTTP status, protocol, selected bounded headers, TLS version when observed, and probe duration. It is repeated in each JSONL candidate record for self-contained processing, although network requests occur only once per origin. The per-endpoint `metrics.requests` count excludes these shared probes. These are valid HTTP methods under [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html); they are not a replacement for [Nmap's general service-version probes](https://nmap.org/book/vscan-examples.html).
+
 ## 2. Identify the protocol era
 
 MCPEnum first sends `server/discover` with the `2026-07-28` protocol metadata. A valid modern response confirms MCP and supplies capabilities and, when present, server identity. The scanner then sends list requests with modern request metadata. It does not send `initialize` after a successful modern discovery.
@@ -60,7 +62,7 @@ Terminal text escapes control characters that could otherwise hide content or ma
 
 ## 6. Record evidence and limits
 
-The JSON result contains a `services` array, `observations`, and `metrics`. Observations record the phase, MCP method, path, HTTP status, JSON-RPC status or code, elapsed time, and response size. Bounded HTTP `Server` and `Content-Type` response headers are also recorded, so a non-MCP HTTP candidate can still provide a service clue. `resolved_path` records a same-origin redirect's final path when it differs from the candidate; confirmed service identity uses that final path. A header is self-reported and does not prove a product or version. Findings and collections refer to observations by evidence ID. Bearer tokens and session IDs are not included in output.
+The JSON result contains a `services` array, `observations`, `port_info`, and `metrics`. Observations record the phase, MCP method, path, HTTP status, JSON-RPC status or code, elapsed time, and response size. Bounded HTTP `Server` and `Content-Type` response headers are also recorded, so a non-MCP HTTP candidate can still provide a service clue. `port_info` adds separate port-level HTTP responses. `resolved_path` records a same-origin redirect's final path when it differs from the candidate; confirmed service identity uses that final path. A header is self-reported and does not prove a product or version. Findings and collections refer to observations by evidence ID. Bearer tokens and session IDs are not included in output.
 
 For multi-candidate text scans, MCPEnum prints a summary, one full inventory per distinct confirmed endpoint, and compact rows for other candidates. Redirect aliases are shown without repeating the same inventory. JSON/JSONL preserves every candidate result for audit and automation.
 

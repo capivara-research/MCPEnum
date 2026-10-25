@@ -23,6 +23,16 @@ type Config struct {
 	Rate      int // global HTTP requests per second; zero disables pacing
 	gate      <-chan time.Time
 	UserAgent string
+	HTTPProbe string              // off, basic, or extended; performed once per origin
+	Progress  func(ProgressEvent) // optional scan telemetry; callbacks may be concurrent
+}
+
+type ProgressEvent struct {
+	Phase  string
+	Done   int
+	Total  int
+	Target string
+	Status string
 }
 
 type Result struct {
@@ -32,6 +42,7 @@ type Result struct {
 	ScanStatus    string        `json:"scan_status"`
 	Services      []Service     `json:"services"`
 	Observations  []Observation `json:"observations"`
+	PortInfo      *PortInfo     `json:"port_info,omitempty"`
 	Metrics       Metrics       `json:"metrics"`
 	Warnings      []string      `json:"warnings,omitempty"`
 }
@@ -41,6 +52,36 @@ type Target struct {
 	Host   string `json:"host"`
 	Port   int    `json:"port"`
 	Scheme string `json:"scheme,omitempty"`
+}
+
+// PortInfo records bounded HTTP observations shared by paths on one origin.
+// Product and version headers are self-reported, not independently verified.
+type PortInfo struct {
+	Origin     string          `json:"origin"`
+	TCPState   string          `json:"tcp_state"`
+	TLSVersion string          `json:"tls_version,omitempty"`
+	DurationMS int64           `json:"duration_ms"`
+	Probes     []HTTPProbeInfo `json:"probes"`
+}
+
+type HTTPProbeInfo struct {
+	Method          string `json:"method"`
+	Path            string `json:"path"`
+	Status          int    `json:"status,omitempty"`
+	StatusText      string `json:"status_text,omitempty"`
+	Protocol        string `json:"protocol,omitempty"`
+	Server          string `json:"server,omitempty"`
+	PoweredBy       string `json:"powered_by,omitempty"`
+	ContentType     string `json:"content_type,omitempty"`
+	ContentLength   string `json:"content_length,omitempty"`
+	Date            string `json:"date,omitempty"`
+	Via             string `json:"via,omitempty"`
+	Allow           string `json:"allow,omitempty"`
+	Location        string `json:"location,omitempty"`
+	WWWAuthenticate string `json:"www_authenticate,omitempty"`
+	Title           string `json:"title,omitempty"`
+	ErrorCode       string `json:"error_code,omitempty"`
+	ElapsedMS       int64  `json:"elapsed_ms"`
 }
 
 type Service struct {

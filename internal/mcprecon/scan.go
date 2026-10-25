@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -31,7 +32,7 @@ func BroadPaths() []string     { return append([]string(nil), broadPaths...) }
 func ExtensivePaths() []string { return append([]string(nil), extensivePaths...) }
 
 func Defaults() Config {
-	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: append([]string(nil), standardPaths...), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0"}
+	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: append([]string(nil), standardPaths...), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0", HTTPProbe: "basic"}
 }
 
 func Scan(ctx context.Context, cfg Config) ([]Result, error) {
@@ -45,7 +46,7 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	if len(urls) == 0 {
 		return nil, errors.New("no targets supplied")
 	}
-	if cfg.Workers < 1 || cfg.Workers > 256 || cfg.Timeout < 100 || cfg.Budget < cfg.Timeout || cfg.MaxPages < 1 || cfg.MaxItems < 1 || cfg.MaxBody < 1024 || cfg.Rate < 0 || cfg.Rate > 10000 || len(cfg.UserAgent) > 128 || strings.ContainsAny(cfg.UserAgent, "\r\n") {
+	if cfg.Workers < 1 || cfg.Workers > 256 || cfg.Timeout < 100 || cfg.Budget < cfg.Timeout || cfg.MaxPages < 1 || cfg.MaxItems < 1 || cfg.MaxBody < 1024 || cfg.Rate < 0 || cfg.Rate > 10000 || len(cfg.UserAgent) > 128 || strings.ContainsAny(cfg.UserAgent, "\r\n") || (cfg.HTTPProbe != "off" && cfg.HTTPProbe != "basic" && cfg.HTTPProbe != "extended") {
 		return nil, errors.New("invalid scan limits")
 	}
 	if cfg.Rate > 0 {
@@ -56,12 +57,22 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	results := make([]Result, len(urls))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
+	var completed atomic.Int64
+	if cfg.Progress != nil {
+		cfg.Progress(ProgressEvent{Phase: "mcp", Done: 0, Total: len(urls)})
+	}
 	for i := 0; i < cfg.Workers && i < len(urls); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for idx := range jobs {
+				if cfg.Progress != nil {
+					cfg.Progress(ProgressEvent{Phase: "start", Target: urls[idx], Status: "starting"})
+				}
 				results[idx] = scanURL(ctx, urls[idx], cfg)
+				if cfg.Progress != nil {
+					cfg.Progress(ProgressEvent{Phase: "mcp", Done: int(completed.Add(1)), Total: len(urls), Target: urls[idx], Status: results[idx].ScanStatus})
+				}
 			}
 		}()
 	}
@@ -76,6 +87,9 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	}
 	close(jobs)
 	wg.Wait()
+	if cfg.HTTPProbe != "off" {
+		attachPortProfiles(ctx, results, cfg)
+	}
 	return results, nil
 }
 

@@ -42,10 +42,55 @@ TARGET  http://127.0.0.1:13004/mcp
 Result: complete | 5 requests | 14 ms
 Summary: MCP confirmed | anonymously listed tools: 1 (complete) | review leads: 0
 
-IDENTIFICATION → ACCESS → INVENTORY ANONYMOUS → OBSERVATIONS
+PORT & HTTP → IDENTIFICATION → ACCESS → INVENTORY ANONYMOUS → OBSERVATIONS
 ```
 
 The preview is illustrative; counts and timing depend on the server and network.
+
+Here is an **actual abbreviated run** against an authorized local training server on port 13000. The banner and two progress bars are written to `stderr` (the bars update in place in a terminal):
+
+```sh
+./mcpenum scan --url http://127.0.0.1:13000/mcp --http-probe extended --progress always
+```
+
+```text
+MCPEnum  |  MCP discovery and inventory
+HTTP service evidence is separate from MCP confirmation.
+MCP candidates [########################] 1/1
+HTTP origins [########################] 1/1
+```
+
+The report on `stdout` began as follows; the inventory excerpt below keeps the observed partial state:
+
+```text
+TARGET  http://127.0.0.1:13000/mcp
+Result: partial | 7 requests | 35 ms
+Summary: MCP confirmed | anonymously listed tools: 12 (complete) | review leads: 6
+
+PORT & HTTP
+  Origin: http://127.0.0.1:13000 | TCP: open
+  HTTP probes: 3 requests | 4 ms
+  HEAD /: HTTP/1.1 404 Not Found
+    X-Powered-By: VulnerableMCP/1.0.0
+  OPTIONS /: HTTP/1.1 204 No Content
+    X-Powered-By: Express
+  GET /: HTTP/1.1 404 Not Found
+    Title: Error
+
+IDENTIFICATION
+  MCP: confirmed | confidence: high
+  Endpoint: /mcp
+  Server: vulnerable-mcp-server 1.0.0 (self-reported)
+  MCP version: 2024-11-05
+
+INVENTORY ANONYMOUS
+  Tools:               12 items, complete, 1 page
+  Resources:           3 items, complete, 1 page
+  Resource templates:  failed [-32603]
+  Prompts:             2 items, complete, 1 page
+```
+
+`partial` is accurate here: the server returned an error for resource templates even though MCP and the other lists were confirmed. The HTTP `X-Powered-By` values are server-reported clues and may differ between routes.
 
 The default output is a human-readable report on stdout. Its section headings are yellow when stdout is a color-capable terminal. Use `--color always` to force color or `--color never` for plain text.
 
@@ -128,6 +173,7 @@ A private prefix such as `/tenant/notes/mcp` cannot be inferred reliably from a 
 
 | Area | Data collected | How it is interpreted |
 |---|---|---|
+| Port and HTTP | TCP reachability inferred from responses; bounded `HEAD /` and `OPTIONS /` status, HTTP version, selected headers | HTTP and product headers are observations, not proof of a product or MCP. Collected once per origin. |
 | Endpoint | HTTP response, MCP JSON-RPC envelope, transport | A generic HTTP response or Bearer challenge alone does not confirm MCP. |
 | Protocol | `server/discover` for modern MCP, with `initialize` fallback for older servers | The reported version is the server's response, not merely the version offered by MCPEnum. |
 | Identity | Server name, version, capabilities, session behavior | Server identity is self-reported. |
@@ -140,22 +186,23 @@ Review leads currently cover state-changing names, internal-only markers, proces
 
 For the modern MCP revision (`2026-07-28`), MCPEnum uses `server/discover` and request metadata. For handshake-era servers (`2025-11-25` and earlier), it falls back to `initialize` and `notifications/initialized`. The same endpoint may support both eras. A nonstandard or missing version in `initialize` requires a valid `tools/list` response before MCPEnum marks the service confirmed. See the [MCP versioning specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning) for the distinction between eras.
 
-The default scan sends only discovery, handshake, metadata, and `*/list` requests. It never sends `tools/call`, `resources/read`, or `prompts/get`. A legacy `initialize` can create a server-side session; MCPEnum reports whether a session ID was observed without printing its value.
+The default scan also sends `HEAD /` and `OPTIONS /` once per origin for port and HTTP evidence. `--http-probe off` disables those requests; `--http-probe extended` adds a bounded `GET /` to extract an HTML title when present. The scanner never sends `tools/call`, `resources/read`, or `prompts/get`. A legacy `initialize` can create a server-side session; MCPEnum reports whether a session ID was observed without printing its value.
 
 | Scan phase | Requests MCPEnum may send | Purpose |
 |---|---|---|
+| Port and HTTP | `HEAD /`, `OPTIONS /`; optional bounded `GET /` | Observe HTTP status, protocol, selected headers, and optional HTML title once per origin. |
 | Modern discovery | `server/discover` | Confirm a modern MCP server and read advertised capabilities. |
 | Legacy fallback | `initialize`, then `notifications/initialized` | Negotiate a handshake-era revision when modern discovery does not confirm one. |
 | Inventory | `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` | Collect each list and follow pagination within configured limits. |
 | Authentication metadata | Same-origin OAuth protected-resource metadata request when advertised | Describe the challenge without contacting an authorization server. |
 
-The number of requests varies with protocol era, pagination, authentication, and failures. `requests` in the report is the observed count for that endpoint.
+The number of requests varies with protocol era, pagination, authentication, and failures. `requests` in the result line counts MCP requests for that endpoint; the `PORT & HTTP` section shows its separate probe count and time. In multi-path scans, the port profile is collected once per origin and shown once in terminal output.
 
 For the exact request sequence, collection states, and evidence model, see [How MCPEnum performs a scan](docs/TECHNICAL.md).
 
 ## Example terminal output
 
-This sample follows a local test with the official MCP Python SDK v2. The server name has been simplified for documentation; durations and request counts vary by server and network.
+This MCP inventory excerpt follows a local test with the official MCP Python SDK v2. The server name has been simplified for documentation; durations and request counts vary by server and network. The separately collected port section is omitted from this older excerpt; an observed example follows it.
 
 ```text
 TARGET  http://127.0.0.1:13004/mcp
@@ -202,6 +249,23 @@ OBSERVATIONS
 
 The section dividers separate identification, access, inventory, and observations. When a collection fails, its row shows `failed` and an error code instead of silently showing zero items. `--schemas` adds full tool input schemas to the text view.
 
+An excerpt of the new `PORT & HTTP` section on a local training server:
+
+```text
+PORT & HTTP
+  Origin: http://127.0.0.1:13000 | TCP: open
+  HTTP probes: 2 requests | 2 ms
+  HEAD /: HTTP/1.1 404 Not Found
+    X-Powered-By: VulnerableMCP/1.0.0
+    Content-Type: text/html; charset=utf-8
+    Content-Length: 140
+  OPTIONS /: HTTP/1.1 204 No Content
+    X-Powered-By: Express
+    Content-Length: 0
+```
+
+Timing is illustrative. This is HTTP evidence from server responses; the separate MCP handshake confirms the protocol. `--http-probe extended` may add an HTML title from at most 4096 response bytes. Redirect locations are shown without query strings, and response headers are length-limited. These valid HTTP requests do not reproduce Nmap's binary or malformed service probes, so they do not provide a general service-version fingerprint.
+
 When a server advertises tools whose declarations suggest sensitive capabilities, they move into **TOOLS WITH REVIEW LEADS**. For example, an authorized local training server produced these lines (other tools omitted):
 
 ```text
@@ -226,6 +290,12 @@ The labels describe advertised metadata. MCPEnum did not invoke either tool, so 
 ```
 
 An explicit `--url` probes only that URL. If the path is omitted, `/mcp` is used.
+
+For a per-request trace while diagnosing a slow or partial scan, use `--verbose`. It reports request methods and HTTP status on `stderr`, without changing the JSON result on `stdout`:
+
+```sh
+./mcpenum scan --url https://mcp.example.test/mcp --verbose --format json > result.json
+```
 
 ### Search selected ports and paths
 
@@ -298,13 +368,17 @@ For scans with multiple candidate paths, terminal output starts with a discovery
 | `--target HOST[:PORT]` | — | Expand host with selected ports and paths; repeatable. |
 | `--targets-file FILE` | — | Read URLs or hosts, one per line. |
 | `--ports LIST` | `443,3000,8000,8080` | Comma-separated ports or short ranges for `--target`. |
-| `--path PATH` | Seven standard paths | Candidate path for `--target`; repeatable and replaces the path profile. |
+| `--path PATH` | Eight standard paths | Candidate path for `--target`; repeatable and replaces the path profile. |
 | `--paths-file FILE` | — | Read candidate paths, one per line; combines with `--path` and replaces the profile. |
 | `--path-profile` | `standard` | `standard` (8), `broad` (16), or `extensive` (27) candidate paths for `--target`. |
 | `--format` | `text` | `text`, `json`, or `jsonl`. |
 | `--color` | `auto` | `auto`, `always`, or `never` for text output. `NO_COLOR` is respected in auto mode. |
 | `--schemas` | off | Include full tool input schemas in text output. |
 | `--profile` | `inventory` | Select the scan profile; only `inventory` is implemented. |
+| `--http-probe` | `basic` | `off`, `basic` (`HEAD /`, `OPTIONS /`), or `extended` (also bounded `GET /`). Probes run once per origin without a Bearer token. |
+| `--progress` | `auto` | Progress on `stderr`: `auto` for a terminal, `always`, or `never`. Shows completed MCP candidates and HTTP origins. |
+| `--verbose` | off | Log candidate starts, protocol requests and completed targets on `stderr`. |
+| `--quiet` | off | Suppress the banner and progress/status messages on `stderr`. Cannot be combined with `--verbose`. |
 | `--token-env NAME` | — | Read a Bearer token from an environment variable. |
 | `--token-file FILE` | — | Read a Bearer token from a file. |
 | `--timeout-ms N` | `5000` | Timeout for each request. |
@@ -319,6 +393,8 @@ For scans with multiple candidate paths, terminal output starts with a discovery
 | `--user-agent VALUE` | `MCPEnum/0.1.0` | Set the HTTP User-Agent. |
 
 Run `./mcpenum scan --help` for the live flag list. A target is required; a bare `mcpenum` command prints usage.
+
+The scanner prints its name and purpose when a scan starts. Progress and verbose messages use `stderr`; `--format json` and `jsonl` keep `stdout` machine-readable. The progress bar counts completed work units, not elapsed-time percentage.
 
 The CLI exits with status `2` for invalid arguments or other command errors. A completed command can still report `scan_status: failed`, an inconclusive detection, or a partial list: inspect the result fields instead of using exit status alone as a test for “MCP found.”
 
@@ -345,6 +421,7 @@ The JSON output uses `schema_version: "2.0"` and `scanner: "mcpenum"`. Its princ
 | JSON path | Content |
 |---|---|
 | `target` | Input URL, host, port, and scheme. |
+| `port_info` | Shared origin-level TCP inference, HTTP probe statuses, HTTP version, selected bounded headers, and optional HTML title. Omitted with `--http-probe off`. |
 | `services[].detection` | Confirmation state, confidence, reason, and evidence IDs. |
 | `services[].authentication` | Anonymous and credentialed access states. |
 | `services[].mcp` | Transport, era, negotiated version, self-reported identity, capabilities, and inventories. |
@@ -352,7 +429,7 @@ The JSON output uses `schema_version: "2.0"` and `scanner: "mcpenum"`. Its princ
 | `services[].mcp.inventories.credentialed` | Four list results when a Bearer token was provided. |
 | `services[].findings` | Confirmed exposure observations and inferred review leads. |
 | `observations` | Method, phase, path, HTTP/JSON-RPC status, bounded `Server` and `Content-Type` headers, timing, and size for each request. |
-| `metrics` | Request count, elapsed time, connection count, and bytes received. |
+| `metrics` | MCP request count, elapsed time, connection count, and bytes received for the endpoint. Port-probe count and duration are in `port_info`. |
 
 Each finding and collection refers to relevant observations through `evidence_ids`. This lets an integration trace a conclusion back to the requests that produced it. The scanner does not include Bearer tokens or session ID values in output.
 
@@ -380,7 +457,7 @@ When `services` is empty, the `jq` filter returns no rows; inspect `scan_status`
 - **Reachability:** MCPEnum uses the network route and proxy configuration available to the Go process. It does not start a VPN, perform a broad TCP port scan, or discover unknown paths beyond those selected with `--target` and `--path`.
 - **Transports:** Streamable HTTP is supported for modern and handshake-era MCP. Legacy HTTP+SSE is supported through `/sse`. Local stdio servers are not launched by this release.
 - **Authentication:** The scanner understands anonymous access and an optional HTTP Bearer token. It does not log in interactively or authenticate with HTTP Basic, cookies, OAuth authorization-code flows, or client certificates.
-- **Request effects:** It sends discovery, handshake, OAuth metadata, and list requests; it does not send `tools/call`, `resources/read`, or `prompts/get`. A legacy handshake may create a server-side session.
+- **Request effects:** It sends discovery, handshake, OAuth metadata, list requests, and bounded HTTP port probes by default; it does not send `tools/call`, `resources/read`, or `prompts/get`. A legacy handshake may create a server-side session.
 - **Limits:** Request timeout, endpoint budget, response size, pagination, CIDR expansion, worker count, and request rate are configurable. Redirects remain on the original target origin. TLS verification is enabled unless `--insecure` is explicitly chosen.
 - **Interpretation:** A listed tool may be protected at call time. A review lead is a prompt for human investigation, not an exploit result or CVE confirmation.
 
@@ -401,6 +478,8 @@ The tests cover modern discovery, older version negotiation, pagination, authent
 These are local fixtures, not claims about every MCP implementation. The CI job runs tests, `go vet`, and a build on Ubuntu. The tool does not need Nmap installed. [How MCPEnum performs a scan](docs/TECHNICAL.md) describes the request flow in more detail.
 
 A separate [interoperability validation](docs/VALIDATION.md) compares MCPEnum with the original Nmap MCP scripts across public Go, TypeScript, Python, and Rust server projects, including legacy SSE, a custom path, and per-command timing. It explains protocol-version differences and the limits of the local measurements.
+
+The [tool audit and improvement roadmap](docs/auditoria-ferramenta-2026-10-25.md) records the port-probe comparison, practices already applied, and the next accuracy improvements.
 
 ## Troubleshooting and FAQ
 

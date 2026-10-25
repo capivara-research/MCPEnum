@@ -114,6 +114,46 @@ func TestTerminalColorModes(t *testing.T) {
 	}
 }
 
+func TestProgressAndVerboseKeepJSONMachineReadable(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer s.Close()
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"progress", []string{"--progress", "always"}, "MCP candidates ["},
+		{"verbose", []string{"--verbose"}, "[1/1]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errout bytes.Buffer
+			args := append([]string{"scan", "--url", s.URL + "/missing", "--http-probe", "off", "--format", "json"}, tc.args...)
+			if err := run(args, &out, &errout); err != nil {
+				t.Fatal(err)
+			}
+			var result mcprecon.Result
+			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+				t.Fatalf("stdout is not valid JSON: %v; output=%q", err, out.String())
+			}
+			if !strings.Contains(errout.String(), "MCPEnum") || !strings.Contains(errout.String(), tc.want) {
+				t.Fatalf("missing banner or status on stderr: %q", errout.String())
+			}
+			if tc.name == "verbose" && !strings.Contains(errout.String(), "REQUEST") {
+				t.Fatalf("verbose mode did not report protocol requests: %q", errout.String())
+			}
+		})
+	}
+	var out, errout bytes.Buffer
+	if err := run([]string{"scan", "--url", s.URL + "/missing", "--http-probe", "off", "--format", "json", "--quiet", "--progress", "always"}, &out, &errout); err != nil {
+		t.Fatal(err)
+	}
+	if errout.Len() != 0 {
+		t.Fatalf("quiet mode wrote to stderr: %q", errout.String())
+	}
+}
+
 func TestTerminalUnconfirmedShowsProbeEvidence(t *testing.T) {
 	result := mcprecon.Result{
 		Target:     mcprecon.Target{Input: "http://lab.test/not-mcp"},
@@ -134,9 +174,11 @@ func TestTerminalUnconfirmedShowsProbeEvidence(t *testing.T) {
 }
 
 func TestMultipleCandidatesKeepConfirmedDetailAndCompactMisses(t *testing.T) {
+	portInfo := &mcprecon.PortInfo{Origin: "http://lab.test", TCPState: "open", Probes: []mcprecon.HTTPProbeInfo{{Method: "HEAD", Path: "/", Status: 404, Protocol: "HTTP/1.1", PoweredBy: "fixture-http"}}}
 	confirmed := mcprecon.Result{
 		Target:     mcprecon.Target{Input: "http://lab.test/mcp"},
 		ScanStatus: "completed",
+		PortInfo:   portInfo,
 		Services: []mcprecon.Service{{
 			Endpoint:  "/mcp",
 			Detection: mcprecon.Detection{Status: "confirmed", Confidence: "high"},
@@ -146,6 +188,7 @@ func TestMultipleCandidatesKeepConfirmedDetailAndCompactMisses(t *testing.T) {
 	miss := mcprecon.Result{
 		Target:       mcprecon.Target{Input: "http://lab.test/api/mcp"},
 		ScanStatus:   "completed",
+		PortInfo:     portInfo,
 		Observations: []mcprecon.Observation{{Phase: "discovery", Method: "initialize", HTTPStatus: 404, HTTPServer: "fixture-http"}},
 	}
 	var out bytes.Buffer
@@ -158,6 +201,9 @@ func TestMultipleCandidatesKeepConfirmedDetailAndCompactMisses(t *testing.T) {
 	}
 	if strings.Count(got, "PROBE OBSERVATIONS") != 0 {
 		t.Fatal("multi-candidate text repeated full negative probe detail")
+	}
+	if strings.Count(got, "PORT & HTTP") != 1 || !strings.Contains(got, "HEAD /: HTTP/1.1 404") || !strings.Contains(got, "X-Powered-By: fixture-http") {
+		t.Fatal("shared port profile missing or repeated")
 	}
 }
 

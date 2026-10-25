@@ -38,12 +38,19 @@ func printResultsStyled(w io.Writer, results []mcprecon.Result, showSchemas, col
 		}
 	}
 	fmt.Fprintf(w, "DISCOVERY SUMMARY  candidates: %d | MCP endpoints: %d | aliases: %d | inconclusive: %d | other: %d\n\n", len(results), confirmed, len(aliases), inconclusive, len(results)-confirmed-len(aliases)-inconclusive)
+	seenPorts := map[string]bool{}
+	for _, result := range results {
+		if result.PortInfo != nil && !seenPorts[result.PortInfo.Origin] {
+			seenPorts[result.PortInfo.Origin] = true
+			printPortInfo(w, result.PortInfo, color)
+		}
+	}
 	for i, result := range results {
 		if resultConfirmed(result) {
 			if _, alias := aliases[i]; alias {
 				continue
 			}
-			printResultStyled(w, result, showSchemas, color)
+			printResultWithPort(w, result, showSchemas, color, false)
 		}
 	}
 	if confirmed < len(results) {
@@ -119,20 +126,58 @@ func bestProbeOutcome(observations []mcprecon.Observation) string {
 }
 
 func printResultStyled(w io.Writer, r mcprecon.Result, showSchemas, color bool) {
+	printResultWithPort(w, r, showSchemas, color, true)
+}
+
+func printResultWithPort(w io.Writer, r mcprecon.Result, showSchemas, color, showPort bool) {
 	fmt.Fprintf(w, "TARGET  %s\n", safeLine(r.Target.Input))
 	fmt.Fprintf(w, "Result: %s | %d requests | %d ms\n", statusLabel(r.ScanStatus), r.Metrics.Requests, r.Metrics.DurationMS)
 	if len(r.Services) == 0 {
 		fmt.Fprintln(w, "Summary: MCP not confirmed")
+		if showPort && r.PortInfo != nil {
+			printPortInfo(w, r.PortInfo, color)
+		}
 		printUnconfirmed(w, r.Observations, color)
 		printWarnings(w, r.Warnings, color)
 		fmt.Fprintln(w)
 		return
 	}
 	printSummary(w, r.Services)
+	if showPort && r.PortInfo != nil {
+		printPortInfo(w, r.PortInfo, color)
+	}
 	for _, s := range r.Services {
 		printService(w, s, showSchemas, color)
 	}
 	printWarnings(w, r.Warnings, color)
+	fmt.Fprintln(w)
+}
+
+func printPortInfo(w io.Writer, p *mcprecon.PortInfo, color bool) {
+	section(w, "PORT & HTTP", color)
+	fmt.Fprintf(w, "  Origin: %s | TCP: %s\n", safeLine(p.Origin), statusLabel(p.TCPState))
+	fmt.Fprintf(w, "  HTTP probes: %d requests | %d ms\n", len(p.Probes), p.DurationMS)
+	if p.TLSVersion != "" {
+		fmt.Fprintf(w, "  TLS: %s\n", safeLine(p.TLSVersion))
+	}
+	if len(p.Probes) == 0 {
+		fmt.Fprintln(w, "  HTTP probes: skipped after connection refusal")
+		fmt.Fprintln(w)
+		return
+	}
+	for _, probe := range p.Probes {
+		outcome := probe.ErrorCode
+		if probe.Status > 0 {
+			outcome = fmt.Sprintf("%s %d %s", probe.Protocol, probe.Status, probe.StatusText)
+		}
+		fmt.Fprintf(w, "  %s %s: %s\n", probe.Method, probe.Path, safeLine(outcome))
+		for _, field := range [][2]string{{"Server", probe.Server}, {"X-Powered-By", probe.PoweredBy}, {"Content-Type", probe.ContentType}, {"Content-Length", probe.ContentLength}, {"Date", probe.Date}, {"Via", probe.Via}, {"Allow", probe.Allow}, {"Location", probe.Location}, {"WWW-Authenticate", probe.WWWAuthenticate}, {"Title", probe.Title}} {
+			if field[1] != "" {
+				fmt.Fprintf(w, "    %s: %s\n", field[0], safeLine(field[1]))
+			}
+		}
+	}
+	fmt.Fprintln(w, "  Header values are server-reported; HTTP probes are separate from MCP request counts.")
 	fmt.Fprintln(w)
 }
 

@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+func testDefaults() Config {
+	cfg := Defaults()
+	cfg.HTTPProbe = "off"
+	return cfg
+}
+
 type testRequest struct {
 	ID     int            `json:"id"`
 	Method string         `json:"method"`
@@ -29,7 +35,7 @@ func rpcErrorResponse(w http.ResponseWriter, id, code int) {
 }
 
 func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.Targets = []string{"127.0.0.1:8000"}
 	urls, err := expandTargets(cfg)
 	if err != nil {
@@ -69,7 +75,7 @@ func TestNonMCPResponseKeepsHTTPFingerprint(t *testing.T) {
 		_, _ = w.Write([]byte("not found"))
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/wrong"}
 	results, err := Scan(context.Background(), cfg)
 	if err != nil {
@@ -89,7 +95,7 @@ func TestMissingSSEPathIsNotInconclusive(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/sse"}
 	results, err := Scan(context.Background(), cfg)
 	if err != nil {
@@ -136,7 +142,7 @@ func TestSameOriginRedirectReportsResolvedMCPEndpoint(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp/"}
 	results, err := Scan(context.Background(), cfg)
 	if err != nil {
@@ -191,7 +197,7 @@ func TestModernPaginationAndEvidence(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	results, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -250,7 +256,7 @@ func TestLegacyFallbackAndSSEBody(t *testing.T) {
 		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"%s\":[]}}\n\n", q.ID, map[string]string{"tools/list": "tools", "resources/list": "resources", "resources/templates/list": "resourceTemplates", "prompts/list": "prompts"}[q.Method])
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	results, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -278,7 +284,7 @@ func TestGenericBearerNotConfirmed(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"token required"}`))
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	r, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -310,7 +316,7 @@ func TestCursorCycleIsPartial(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	r, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -344,7 +350,7 @@ func TestTokenDoesNotHidePublicAccess(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	cfg.Token = "test-secret"
 	r, e := Scan(context.Background(), cfg)
@@ -418,7 +424,7 @@ func TestLegacyHTTPSSE(t *testing.T) {
 		messages <- string(b)
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	for _, path := range []string{"/sse", "/mcp/sse", "/api/sse"} {
 		cfg.URLs = []string{s.URL + path}
 		res, e := Scan(context.Background(), cfg)
@@ -457,7 +463,7 @@ func TestOAuthMetadataOnlySuggestsMCP(t *testing.T) {
 	}))
 	defer s.Close()
 	base = s.URL
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	r, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -491,7 +497,7 @@ func TestList403IsDenied(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	r, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -503,7 +509,7 @@ func TestList403IsDenied(t *testing.T) {
 }
 
 func TestCIDRScopeLimit(t *testing.T) {
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.Targets = []string{"192.0.2.0/29"}
 	cfg.AllowCIDR = true
 	cfg.MaxHosts = 4
@@ -550,7 +556,7 @@ func TestVersionCounteroffer(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	r, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -582,7 +588,7 @@ func TestInvalidListItemIsError(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	r, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -624,7 +630,7 @@ func TestRedirectNeverForwardsTokenToOtherOrigin(t *testing.T) {
 		http.Redirect(w, r, destination.URL+"/mcp", http.StatusTemporaryRedirect)
 	}))
 	defer source.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{source.URL + "/mcp"}
 	cfg.Token = "top-secret"
 	res, e := Scan(context.Background(), cfg)
@@ -645,7 +651,7 @@ func TestResponseLimitDoesNotConfirm(t *testing.T) {
 		fmt.Fprint(w, strings.Repeat("X", 2048))
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	cfg.MaxBody = 1024
 	res, e := Scan(context.Background(), cfg)
@@ -675,7 +681,7 @@ func TestTLSCertificatePolicy(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	res, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -697,7 +703,7 @@ func TestTLSCertificatePolicy(t *testing.T) {
 func TestTimeoutIsNotEmptyInventory(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(200 * time.Millisecond) }))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	cfg.Timeout = 100
 	cfg.Budget = 300
@@ -737,7 +743,7 @@ func TestIncompleteHandshakeWithValidList(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	res, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -778,7 +784,7 @@ func TestIncompleteHandshakeWithoutValidListNotConfirmed(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	res, e := Scan(context.Background(), cfg)
 	if e != nil {
@@ -878,7 +884,7 @@ func TestNonstandardProtocolNeedsValidList(t *testing.T) {
 				}
 			}))
 			defer s.Close()
-			cfg := Defaults()
+			cfg := testDefaults()
 			cfg.URLs = []string{s.URL + "/mcp"}
 			got, err := Scan(context.Background(), cfg)
 			if err != nil {
@@ -925,7 +931,7 @@ func TestOlderNegotiatedVersionIsUsedForInventory(t *testing.T) {
 		}
 	}))
 	defer s.Close()
-	cfg := Defaults()
+	cfg := testDefaults()
 	cfg.URLs = []string{s.URL + "/mcp"}
 	got, err := Scan(context.Background(), cfg)
 	if err != nil {

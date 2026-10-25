@@ -76,6 +76,12 @@ The first post-change text report classified the non-existent `/sse` candidate a
 
 ## Assessment and limits
 
+### Port and HTTP evidence added after the inventory comparison
+
+The default HTTP profile was checked against the local training server at `127.0.0.1:13000` and the Rust SDK example at `127.0.0.1:14005`. On the training server, MCPEnum observed `HEAD /` → `HTTP/1.1 404 Not Found` with `X-Powered-By: VulnerableMCP/1.0.0`, and `OPTIONS /` → `HTTP/1.1 204 No Content` with `X-Powered-By: Express`. Its MCP inventory still had 12 tools and 3 resources; the resource-template failure stayed visible. In separate local runs, `--http-probe off`, `basic`, and `extended` used 0, 2, and 3 additional HTTP requests respectively while retaining the same seven MCP requests.
+
+On the Rust example, MCPEnum's `HEAD /` and `OPTIONS /` both returned `HTTP/1.1 404 Not Found`; the MCP inventory remained 8 tools, 2 resources, and 2 prompts. Nmap `-sV` identified the MCP service and printed `HTTP/1.0 404` for its `GetRequest`/`HTTPOptions` probes, plus `HTTP/1.1 400` for several non-HTTP service probes. The HTTP-version and status differences reflect different probes, not an inventory discrepancy. MCPEnum collects valid, bounded HTTP responses and selected headers once per origin; it does not attempt Nmap's wider fingerprint matrix.
+
 MCPEnum produced complete, correctly separated inventories across the tested Go, TypeScript, Python, and Rust servers, including Streamable HTTP, legacy SSE, and a custom route. Its measured command time was lower than Nmap's in every local exact-endpoint run, but a single loopback run is insufficient to establish a general speed ratio. The protocol-version and TypeScript tool-count differences follow the servers' negotiated behavior. The SSE session-reporting, default-path coverage, and missing-SSE classification gaps were corrected and retested; no inventory-count defect was found in these fixtures.
 
 This is inventory validation, not execution or vulnerability testing. It does not establish that listed tools are callable, that access controls are correct, or that the scanner covers every MCP implementation. Repeat the same checks on a new server version before relying on the counts. Keep `--url` or a scoped `--path` list for known routes; use `extensive` when the route is unknown and the extra requests fit the scan budget.
