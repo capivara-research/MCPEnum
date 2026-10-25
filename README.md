@@ -19,6 +19,8 @@ go build -o mcpenum ./cmd/mcpenum
 
 The default output is a human-readable report on stdout. Its section headings are yellow when stdout is a color-capable terminal. Use `--color always` to force color or `--color never` for plain text.
 
+MCPEnum's own headings and messages are in English. Server-supplied names and descriptions are shown in their original language so the evidence is not altered.
+
 ## What MCPEnum looks for
 
 | Area | Data collected | How it is interpreted |
