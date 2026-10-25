@@ -21,7 +21,7 @@ sudo install -m 0755 mcpenum /usr/local/bin/mcpenum
 mcpenum --target 127.0.0.1:8000
 ```
 
-Replace the example with a host and port in your authorized scope. You do not need to know the endpoint path: MCPEnum first checks the selected TCP port, confirms HTTP(S), then tests 17 MCP candidates. A `host:port` target checks only that port; a host without a port checks `80,443,3000,8000,8080,8443`. For an unknown port outside that list, use `--scan-ports START-END`.
+Replace the example with a host and port in your authorized scope. You do not need to know the endpoint path: MCPEnum checks the selected TCP port, confirms HTTP(S), then tests 17 MCP candidates. With `--target HOST` and no port, it checks TCP ports 1–65535 by default and tests MCP paths on every HTTP(S) port found. This full scan can take several minutes; use `HOST:PORT`, `--ports`, or `--scan-ports` to limit it.
 
 For an endpoint you already know, use its exact URL. If the URL has no path, MCPEnum uses `/mcp`:
 
@@ -35,7 +35,15 @@ Run `mcpenum --version` to identify the installed build when reporting a problem
 
 ## Endpoint discovery
 
-`--url` scans only the supplied URL. `--target` checks selected TCP ports, detects TLS on open ports, confirms HTTP(S), and then tests candidate paths on those ports. A `host:port` target uses that port only. `--scheme http` or `--scheme https` overrides protocol detection. An endpoint is confirmed through MCP protocol responses, not from HTTP 200 alone.
+`--url` scans only the supplied URL. `--target HOST` first discovers open TCP ports, detects TLS, confirms HTTP(S), and then tests candidate paths on each HTTP(S) port. `HOST:PORT` limits discovery to one port. `--ports` selects specific ports, and `--scan-ports START-END` selects a range. `--no-port-scan` sends MCP candidate requests directly to an explicitly selected port; when using it on a nonstandard TLS port, supply `--scheme https`. An endpoint is confirmed through MCP protocol responses, not from HTTP 200 alone.
+
+| What you know | Command | Network work |
+|---|---|---|
+| Host only | `mcpenum --target 10.0.0.5` | Check ports 1–65535, identify HTTP(S), test MCP paths. |
+| Port known | `mcpenum --target 10.0.0.5:8000` | Check one port, identify HTTP(S), test MCP paths. |
+| Selected ports | `mcpenum --target 10.0.0.5 --ports 8000,8443` | Check only those ports, then test HTTP(S) paths. |
+| HTTP service known; skip checks | `mcpenum --target 10.0.0.5:8000 --no-port-scan` | Test MCP paths directly on that port. |
+| Endpoint known | `mcpenum --url http://10.0.0.5:8000/mcp` | Test only that URL; no port discovery or path guessing. |
 
 | Profile | Paths per selected port | Use |
 |---|---:|---|
@@ -52,8 +60,8 @@ mcpenum --target 10.0.0.5:8000 --path-profile standard
 mcpenum --target 10.0.0.5 --ports 8000,8080 --path-profile extensive
 mcpenum --target mcp.example.test:8443
 mcpenum --target 10.0.0.5:8000 --path /tenant/team/mcp
-# Unknown port: check the authorized TCP range before MCP paths
-mcpenum --target 10.0.0.5 --scan-ports 1-65535 --verbose
+# Narrow the TCP range when appropriate
+mcpenum --target 10.0.0.5 --scan-ports 7900-8100 --verbose
 ```
 
 For several custom paths, use `--paths-file`. Each nonblank line is one path; blank lines and lines beginning with `#` are ignored. Custom paths replace the built-in profile, and repeated `--path` values combine with the file. The limit is 128 paths, each up to 256 bytes.
@@ -68,25 +76,31 @@ For several custom paths, use `--paths-file`. Each nonblank line is one path; bl
 mcpenum --target 10.0.0.5:8000 --paths-file paths.txt
 ```
 
-`--scan-ports` is opt in because checking all 65,535 TCP ports takes time and creates connection traffic. The default is 64 TCP workers with a 1,000 ms timeout and one retry for transient errors; adjust `--port-workers` and `--port-timeout-ms` to fit the network. It accepts host targets without an explicit port; the current implementation does not combine this mode with CIDR. MCPEnum does not discover arbitrary private prefixes. A negative result applies only to the selected ports and paths.
+The full scan is the default for a bare host. It uses 256 TCP workers, up to 500 connections per second, an initial 300 ms attempt, and one retry up to 1,000 ms for transient errors. Adjust `--port-workers`, `--port-rate`, and `--port-timeout-ms` to fit the network. CIDR expansion still requires `--allow-cidr` and is bounded by `--max-hosts`; a full range across many hosts can take a long time. MCPEnum does not discover arbitrary private prefixes. A negative result applies only to the ports and paths tested.
+
+Some HTTP servers close `HEAD /` and `OPTIONS /` without returning an HTTP response. If you already know such a service's port, use `--target HOST:PORT --no-port-scan` to test MCP paths directly; add `--scheme https` when that port uses TLS. Use `--url` when the endpoint path is known too.
 
 ## Example output
 
-This AI-RTA SecureCorp lab scan was captured on 25 October 2026 with `mcpenum --target 172.16.12.2 --scan-ports 7999-8001 --verbose --progress never`. The scanner found HTTP on port 8000, tested 17 paths on that port, and confirmed two MCP endpoints. The lines below are selected from the actual `stdout` and `stderr` output.
+This AI-RTA SecureCorp lab scan was captured on 25 October 2026 with a source build. The command used `timeout 600 ./mcpenum --target 172.16.12.2 --verbose --progress never --format text`, with `stdout` and `stderr` redirected to separate files. With an installed binary, use `mcpenum` in place of `./mcpenum`. The scanner checked ports 1–65535, found open TCP on 22 and 8000, confirmed HTTP on 8000, and tested 17 MCP paths there. The lines below are selected from the actual output.
 
 Selected output:
 
 ```text
+PORT  172.16.12.2:22: open
 PORT  172.16.12.2:8000: open
-PORT  172.16.12.2:8001: connection_refused
-PORT  172.16.12.2:7999: connection_refused
-PORT  1/1 | http://172.16.12.2:8000: HTTP http
+PORTS  65535/65535 checked
+PORT  1/2 | http://172.16.12.2:22: open, HTTP unconfirmed
+PORT  2/2 | http://172.16.12.2:8000: HTTP http
 
-DISCOVERY SUMMARY  candidates: 17 | MCP endpoints: 2 | aliases: 0 | inconclusive: 2 | other: 13
+DISCOVERY SUMMARY  candidates: 18 | MCP endpoints: 2 | aliases: 0 | inconclusive: 2 | other: 14
+
+HTTP PORTS
+  http://172.16.12.2:8000  MCP: /mcp, /mcp/messages
 
 PORT & HTTP
   Origin: http://172.16.12.2:8000 | TCP: open
-  HEAD /: HTTP/1.1 405 Method Not Allowed
+  HEAD /: timeout
   OPTIONS /: HTTP/1.1 405 Method Not Allowed
 
 TARGET  http://172.16.12.2:8000/mcp
@@ -97,12 +111,9 @@ TARGET  http://172.16.12.2:8000/mcp/messages
 Summary: MCP confirmed | anonymously listed tools: 4 (complete) | review leads: 2
   Endpoint: /mcp/messages
 
-INCONCLUSIVE CANDIDATES
-  /sse      HTTP 200; no MCP confirmation
-  /mcp/sse  HTTP 200; no MCP confirmation
 ```
 
-The scan listed advertised tools but did not call them. HTTP 200 responses without MCP confirmation remain inconclusive. The order of `PORT` lines can vary because TCP checks run concurrently.
+The scan listed advertised tools but did not call them. HTTP 200 responses without MCP confirmation remain inconclusive. The order of `PORT` lines can vary because TCP checks run concurrently. The full report also shows every other candidate and the TCP-open port where HTTP was not confirmed.
 
 ## Common commands
 
@@ -125,7 +136,7 @@ mcpenum --target mcp.example.test:8000 --format json --verbose
 
 Set `MCPENUM_TOKEN` before the token example. The scanner checks anonymous access first, then repeats discovery and inventory with the Bearer token. Tokens and session ID values are not printed. `--token-file PATH` is also available.
 
-`--targets-file` accepts blank lines and `#` comments. CIDR expansion requires `--allow-cidr` and is bounded by `--max-hosts`. The optional TCP range scan identifies open ports, but it is a bounded connect scan rather than a general service or OS fingerprinting replacement for Nmap.
+`--targets-file` accepts blank lines and `#` comments. CIDR expansion requires `--allow-cidr` and is bounded by `--max-hosts`. The TCP discovery is a bounded connect scan rather than a general service or OS fingerprinting replacement for Nmap.
 
 ## Options
 
@@ -134,10 +145,12 @@ Set `MCPENUM_TOKEN` before the token example. The scanner checks anonymous acces
 | `--url URL` | — | Exact HTTP(S) MCP URL; repeatable. |
 | `--target HOST[:PORT]` | — | Expand a host across selected ports and paths; repeatable. |
 | `--targets-file FILE` | — | Read URLs, hosts, or host:port values, one per line. |
-| `--ports LIST` | `80,443,3000,8000,8080,8443` | Selected ports or short ranges used with `--target`; at most 128 ports. |
-| `--scan-ports START-END` | off | Discover open TCP ports in an authorized range before MCP path tests. |
-| `--port-workers N` | `64` | Concurrent TCP checks in range discovery. |
-| `--port-timeout-ms N` | `1000` | Per-port timeout; transient failures receive one retry. |
+| `--ports LIST` | unset | Limit a bare host to selected ports or short ranges; at most 128 ports. |
+| `--scan-ports START-END` | `1-65535` for a bare host | Override the TCP discovery range. |
+| `--no-port-scan` | off | Skip TCP/HTTP identification and test MCP paths directly; supply `HOST:PORT` or `--ports`. |
+| `--port-workers N` | `256` | Concurrent TCP checks in range discovery. |
+| `--port-rate N` | `500` | Maximum TCP connections per second; `0` disables pacing. |
+| `--port-timeout-ms N` | `1000` | Retry timeout after the initial 300 ms attempt. |
 | `--scheme MODE` | `auto` | Detect TLS on open ports, or force `http` or `https` for `--target`. |
 | `--path PATH` | Broad profile | Add a candidate path; repeatable. Custom paths replace the profile. |
 | `--paths-file FILE` | — | Read paths; combines with `--path` and replaces the profile. |
@@ -145,7 +158,7 @@ Set `MCPENUM_TOKEN` before the token example. The scanner checks anonymous acces
 | `--format FORMAT` | `text` | `text`, `json`, or `jsonl`. |
 | `--color MODE` | `auto` | `auto`, `always`, or `never`; auto respects `NO_COLOR`. |
 | `--schemas` | off | Include full tool input schemas in text output. |
-| `--http-probe MODE` | `basic` | `off`, `basic` (`HEAD /`, `OPTIONS /`), or `extended` (also bounded `GET /`). `--target` still uses HTTP identification requests before MCP paths. |
+| `--http-probe MODE` | `basic` for checked targets; `off` for `--url` or `--no-port-scan` | `off`, `basic` (`HEAD /`, `OPTIONS /`), or `extended` (also bounded `GET /`). Checked targets still use HTTP identification before MCP paths. |
 | `--progress MODE` | `auto` | One progress line on `stderr`: `auto`, `always`, or `never`. |
 | `--verbose` | off | Log candidate starts and protocol requests on `stderr`. |
 | `--quiet` | off | Suppress banner and progress; cannot be combined with `--verbose`. |
@@ -161,13 +174,15 @@ Set `MCPENUM_TOKEN` before the token example. The scanner checks anonymous acces
 | `--allow-cidr` | off | Enable CIDR expansion. |
 | `--max-hosts N` | `16` | Maximum hosts expanded from a CIDR. |
 | `--insecure` | off | Disable TLS certificate verification for controlled tests. |
-| `--user-agent VALUE` | `MCPEnum/0.1.0` | Set the HTTP User-Agent. |
+| `--user-agent VALUE` | `MCPEnum/0.2.0` | Set the HTTP User-Agent. |
 
 For the current flag list, run `mcpenum --help`; use `mcpenum --version` to identify the build.
 
 ## Reading results
 
 MCPEnum keeps scan completion, MCP detection, authentication, and each inventory list separate.
+
+For pentest triage, the text report groups every identified HTTP port and marks the MCP paths confirmed on it. Each confirmed endpoint then shows the transport, self-reported server name/version, anonymous versus credentialed access, advertised tool names and parameters, resources, prompts, and review leads. JSON/JSONL retains the observations and evidence IDs for later validation. These are inventory clues for manual assessment; listing a tool does not establish that it is callable or vulnerable.
 
 | Result | Meaning |
 |---|---|

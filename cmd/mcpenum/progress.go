@@ -52,10 +52,14 @@ func (r *scanReporter) event(ev mcprecon.ProgressEvent) {
 	case "port-range":
 		if r.verbose && ev.Target != "" && (ev.Status == "open" || ev.Total <= 128) {
 			fmt.Fprintf(r.out, "PORT  %s: %s\n", safeLine(ev.Target), safeLine(ev.Status))
+		} else if r.verbose && ev.Done > 0 && (ev.Done%1000 == 0 || ev.Done == ev.Total) {
+			fmt.Fprintf(r.out, "PORTS  %d/%d checked\n", ev.Done, ev.Total)
 		}
 		if r.progress {
 			r.total = ev.Total
-			r.completed = ev.Done
+			if ev.Done > r.completed {
+				r.completed = ev.Done
+			}
 			r.draw("Scanning ports")
 		}
 		return

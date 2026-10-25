@@ -22,11 +22,12 @@ This review compares MCPEnum with Nmap service detection and the OWASP Web Secur
 
 ## Next opportunities
 
-1. **HTTP/TLS identification on nonstandard ports.** Implemented: target scans check TCP, detect TLS, and confirm HTTP before MCP paths. `--scan-ports` can find ports outside the default list. Remaining work: tune identification for servers that reject both `HEAD /` and `OPTIONS /` before any valid MCP request, and measure false negatives on more SDKs.
-2. **Service signatures with provenance.** If product/version signatures are added, report the matching response, rule, and confidence. A lone `Server` header must remain self-reported evidence.
-3. **Non-HTTP services.** An open TCP port without HTTP should remain an unknown service. Generic banner detection would need a separate bounded module rather than an inference from a failed HTTP request.
-4. **Continuous interoperability tests.** Keep fixtures for modern and legacy MCP, authentication, pagination, SSE, custom paths, redirects, and non-MCP HTTP services. Compare items and collection states as well as counts.
-5. **Whole-scan performance accounting.** The new `port_info` records probe count and duration separately, preserving comparable MCP metrics. A benchmark should also record tool version, configuration, and lab latency.
+1. **HTTP/TLS identification on nonstandard ports.** Implemented: bare-host scans check all TCP ports by default, detect TLS, and confirm HTTP before MCP paths. `--scan-ports` narrows the range; `--no-port-scan` bypasses identification for a known service. Remaining work: tune identification for servers that reject both `HEAD /` and `OPTIONS /` before any valid MCP request, and measure false negatives on more SDKs.
+2. **Hostnames with multiple addresses.** A full scan currently resolves a hostname during TCP connects and again during HTTP requests. Pinning one resolved address throughout each port's checks would avoid DNS churn and ambiguity when records differ. Until then, use an IP target for a precise host-level result.
+3. **Service signatures with provenance.** If product/version signatures are added, report the matching response, rule, and confidence. A lone `Server` header must remain self-reported evidence.
+4. **Non-HTTP services.** An open TCP port without HTTP should remain an unknown service. Generic banner detection would need a separate bounded module rather than an inference from a failed HTTP request.
+5. **Continuous interoperability tests.** Keep fixtures for modern and legacy MCP, authentication, pagination, SSE, custom paths, redirects, and non-MCP HTTP services. Compare items and collection states as well as counts.
+6. **Whole-scan performance accounting.** The new `port_info` records probe count and duration separately, preserving comparable MCP metrics. A benchmark should also record tool version, configuration, and lab latency.
 
 ## Sources
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/capivara-research/MCPEnum/internal/mcprecon"
@@ -54,6 +55,18 @@ func TestTerminalOutputShowsActionableInventory(t *testing.T) {
 	printResultStyled(&out, result, false, true)
 	if !strings.Contains(out.String(), "\x1b[1;33mIDENTIFICATION\x1b[0m") || !strings.Contains(out.String(), "\x1b[1;33mACCESS\x1b[0m") || !strings.Contains(out.String(), "\x1b[1;33mINVENTORY ANONYMOUS\x1b[0m") || !strings.Contains(out.String(), "\x1b[1;33mOBSERVATIONS\x1b[0m") {
 		t.Fatal("colored section headings missing")
+	}
+}
+
+func TestTerminalSummarizesEachHTTPPort(t *testing.T) {
+	results := []mcprecon.Result{
+		{Target: mcprecon.Target{Input: "http://lab.test:8000/mcp", Host: "lab.test", Port: 8000, Scheme: "http"}, PortInfo: &mcprecon.PortInfo{Origin: "http://lab.test:8000", TCPState: "open", Probes: []mcprecon.HTTPProbeInfo{{Method: "HEAD", Status: 405}}}, Services: []mcprecon.Service{{Endpoint: "/mcp", Detection: mcprecon.Detection{Status: "confirmed"}}}},
+		{Target: mcprecon.Target{Input: "http://lab.test:8080/mcp", Host: "lab.test", Port: 8080, Scheme: "http"}, PortInfo: &mcprecon.PortInfo{Origin: "http://lab.test:8080", TCPState: "open", Probes: []mcprecon.HTTPProbeInfo{{Method: "HEAD", Status: 404}}}},
+	}
+	var out bytes.Buffer
+	printResultsStyled(&out, results, false, false)
+	if !strings.Contains(out.String(), "HTTP PORTS") || !strings.Contains(out.String(), "http://lab.test:8000  MCP: /mcp") || !strings.Contains(out.String(), "http://lab.test:8080  MCP not confirmed") {
+		t.Fatalf("missing per-port outcome: %s", out.String())
 	}
 }
 
@@ -177,6 +190,79 @@ func TestDirectCLIRejectsRemovedSubcommand(t *testing.T) {
 	}
 }
 
+func TestNoPortScanRequiresSelectedPort(t *testing.T) {
+	var out, errout bytes.Buffer
+	err := run([]string{"--target", "127.0.0.1", "--no-port-scan"}, &out, &errout)
+	if err == nil || !strings.Contains(err.Error(), "needs --ports or a host:port") {
+		t.Fatalf("expected clear port selection error: %v", err)
+	}
+	err = run([]string{"--target", "127.0.0.1", "--scan-ports", "8000-8001", "--no-port-scan"}, &out, &errout)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected conflicting mode error: %v", err)
+	}
+	err = run([]string{"--target", "127.0.0.1", "--ports", ""}, &out, &errout)
+	if err == nil || !strings.Contains(err.Error(), "empty port") {
+		t.Fatalf("empty --ports must not trigger a full scan: %v", err)
+	}
+	err = run([]string{"--target", "127.0.0.1:8000", "--scan-ports", "8000-8001"}, &out, &errout)
+	if err == nil || !strings.Contains(err.Error(), "require a host target") {
+		t.Fatalf("range on explicit port must not be silently ignored: %v", err)
+	}
+}
+
+func TestNoPortScanSendsMCPDirectly(t *testing.T) {
+	var httpProbeCalls atomic.Int64
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			httpProbeCalls.Add(1)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path != "/mcp" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		result := map[string]any{}
+		switch request.Method {
+		case "server/discover":
+			result = map[string]any{"supportedVersions": []string{"2026-07-28"}, "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "heartbeat"}}}
+		case "resources/list":
+			result = map[string]any{"resources": []any{}}
+		case "resources/templates/list":
+			result = map[string]any{"resourceTemplates": []any{}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []any{}}
+		default:
+			t.Errorf("unexpected method %q", request.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer s.Close()
+	var out, errout bytes.Buffer
+	err := run([]string{"--target", strings.TrimPrefix(s.URL, "http://"), "--no-port-scan", "--path", "/mcp", "--format", "json"}, &out, &errout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var results []mcprecon.Result
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if httpProbeCalls.Load() != 0 || len(results) != 1 || len(results[0].Services) != 1 || results[0].Services[0].Detection.Status != "confirmed" {
+		t.Fatalf("direct MCP path test failed or sent HTTP preflight: calls=%d results=%+v", httpProbeCalls.Load(), results)
+	}
+}
+
 func TestTargetHTTPSNonstandardPortDiscoversMCP(t *testing.T) {
 	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/mcp" {
@@ -226,6 +312,19 @@ func TestTargetHTTPSNonstandardPortDiscoversMCP(t *testing.T) {
 	result := results[0]
 	if result.Target.Scheme != "https" || len(result.Services) != 1 || result.Services[0].Detection.Status != "confirmed" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
 		t.Fatalf("HTTPS target was not inventoried: %+v", result)
+	}
+	out.Reset()
+	errout.Reset()
+	err = run([]string{"--target", strings.TrimPrefix(s.URL, "https://"), "--no-port-scan", "--scheme", "https", "--path", "/mcp", "--insecure", "--format", "json"}, &out, &errout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results = nil
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Target.Scheme != "https" || len(results[0].Services) != 1 || results[0].Services[0].Detection.Status != "confirmed" {
+		t.Fatalf("direct HTTPS mode failed: %+v", results)
 	}
 }
 

@@ -35,7 +35,7 @@ func BroadPaths() []string     { return append([]string(nil), broadPaths...) }
 func ExtensivePaths() []string { return append([]string(nil), extensivePaths...) }
 
 func Defaults() Config {
-	return Config{Ports: []int{80, 443, 3000, 8000, 8080, 8443}, Paths: BroadPaths(), Scheme: "auto", Timeout: 5000, Budget: 30000, Workers: 8, Rate: 20, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0", HTTPProbe: "basic", PortDiscovery: true, PortScanWorkers: 64, PortScanTimeout: 1000}
+	return Config{Ports: []int{80, 443, 3000, 8000, 8080, 8443}, Paths: BroadPaths(), Scheme: "auto", Timeout: 5000, Budget: 30000, Workers: 8, Rate: 20, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/" + ClientVersion, HTTPProbe: "basic", PortDiscovery: true, PortScanStart: 1, PortScanEnd: 65535, PortScanWorkers: 256, PortScanTimeout: 1000, PortScanRate: 500}
 }
 
 func Scan(ctx context.Context, cfg Config) ([]Result, error) {
@@ -45,20 +45,21 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	if len(cfg.Ports) > 128 {
 		return nil, errors.New("too many selected ports (maximum 128)")
 	}
-	if cfg.Workers < 1 || cfg.Workers > 256 || cfg.Timeout < 100 || cfg.Budget < cfg.Timeout || cfg.MaxPages < 1 || cfg.MaxItems < 1 || cfg.MaxBody < 1024 || cfg.Rate < 0 || cfg.Rate > 10000 || cfg.PortScanWorkers < 1 || cfg.PortScanWorkers > 512 || cfg.PortScanTimeout < 50 || cfg.PortScanTimeout > 5000 || len(cfg.UserAgent) > 128 || strings.ContainsAny(cfg.UserAgent, "\r\n") || (cfg.HTTPProbe != "off" && cfg.HTTPProbe != "basic" && cfg.HTTPProbe != "extended") {
+	if cfg.Workers < 1 || cfg.Workers > 256 || cfg.Timeout < 100 || cfg.Budget < cfg.Timeout || cfg.MaxPages < 1 || cfg.MaxItems < 1 || cfg.MaxBody < 1024 || cfg.Rate < 0 || cfg.Rate > 10000 || cfg.PortScanWorkers < 1 || cfg.PortScanWorkers > 512 || cfg.PortScanTimeout < 50 || cfg.PortScanTimeout > 5000 || cfg.PortScanRate < 0 || cfg.PortScanRate > 10000 || len(cfg.UserAgent) > 128 || strings.ContainsAny(cfg.UserAgent, "\r\n") || (cfg.HTTPProbe != "off" && cfg.HTTPProbe != "basic" && cfg.HTTPProbe != "extended") {
 		return nil, errors.New("invalid scan limits")
 	}
+	var noOpenPorts []Result
 	if cfg.PortScanStart != 0 {
 		if cfg.PortScanStart < 1 || cfg.PortScanEnd > 65535 || cfg.PortScanEnd < cfg.PortScanStart {
 			return nil, errors.New("invalid port scan range")
 		}
 		var err error
-		cfg.Targets, err = scanPortRange(ctx, cfg)
+		cfg.Targets, noOpenPorts, err = scanPortRange(ctx, cfg)
 		if err != nil {
 			return nil, err
 		}
 		if len(cfg.Targets) == 0 && len(cfg.URLs) == 0 {
-			return nil, errors.New("no open TCP ports found in the selected range")
+			return noOpenPorts, nil
 		}
 	}
 	urls, err := expandTargets(cfg)
@@ -131,7 +132,7 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 			}
 		}
 	}
-	return append(results, skipped...), nil
+	return append(append(results, skipped...), noOpenPorts...), nil
 }
 
 // discoverPorts checks each selected target port once. Exact --url inputs bypass
@@ -278,21 +279,45 @@ func discoverPorts(ctx context.Context, cfg Config, urls []string) ([]string, []
 	return kept, skipped, profiles
 }
 
-func scanPortRange(ctx context.Context, cfg Config) ([]string, error) {
-	if len(cfg.Targets) == 0 {
-		return nil, errors.New("--scan-ports requires --target")
-	}
-	for _, host := range cfg.Targets {
-		if strings.Contains(host, "/") {
-			return nil, errors.New("--scan-ports requires host targets, not CIDR")
+func scanPortRange(ctx context.Context, cfg Config) ([]string, []Result, error) {
+	var hosts, explicit []string
+	for _, target := range cfg.Targets {
+		if strings.Contains(target, "/") {
+			if !cfg.AllowCIDR {
+				return nil, nil, errors.New("CIDR requires --allow-cidr")
+			}
+			prefix, err := netip.ParsePrefix(target)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid CIDR: %q", target)
+			}
+			for ip := prefix.Masked().Addr(); ip.IsValid() && prefix.Contains(ip); ip = ip.Next() {
+				if len(hosts) >= cfg.MaxHosts {
+					return nil, nil, errors.New("CIDR exceeds --max-hosts")
+				}
+				hosts = append(hosts, ip.String())
+			}
+			continue
 		}
-		if _, _, err := net.SplitHostPort(host); err == nil {
-			return nil, errors.New("--scan-ports requires hosts without explicit ports")
+		if _, _, err := net.SplitHostPort(target); err == nil {
+			explicit = append(explicit, target)
+			continue
 		}
+		if strings.Contains(target, ":") {
+			if _, err := netip.ParseAddr(target); err != nil {
+				return nil, nil, fmt.Errorf("invalid target: %q", target)
+			}
+		}
+		hosts = append(hosts, target)
 	}
-	total := (cfg.PortScanEnd - cfg.PortScanStart + 1) * len(cfg.Targets)
-	if total > 65535 {
-		return nil, errors.New("port scan exceeds 65535 TCP checks; reduce range or hosts")
+	if len(hosts) == 0 {
+		return explicit, nil, nil
+	}
+	if len(hosts) > cfg.MaxHosts {
+		return nil, nil, errors.New("port scan exceeds --max-hosts")
+	}
+	total := (cfg.PortScanEnd - cfg.PortScanStart + 1) * len(hosts)
+	if total > 1048560 {
+		return nil, nil, errors.New("port scan exceeds 1048560 TCP checks; reduce range or hosts")
 	}
 	if cfg.Progress != nil {
 		cfg.Progress(ProgressEvent{Phase: "port-range", Total: total})
@@ -306,6 +331,12 @@ func scanPortRange(ctx context.Context, cfg Config) ([]string, error) {
 	var mu sync.Mutex
 	var found []targetPort
 	var completed atomic.Int64
+	var gate <-chan time.Time
+	if cfg.PortScanRate > 0 {
+		ticker := time.NewTicker(time.Second / time.Duration(cfg.PortScanRate))
+		defer ticker.Stop()
+		gate = ticker.C
+	}
 	workers := cfg.PortScanWorkers
 	if workers > total {
 		workers = total
@@ -316,10 +347,27 @@ func scanPortRange(ctx context.Context, cfg Config) ([]string, error) {
 			defer wg.Done()
 			for job := range jobs {
 				address := net.JoinHostPort(job.host, fmt.Sprint(job.port))
-				dialer := &net.Dialer{Timeout: time.Duration(cfg.PortScanTimeout) * time.Millisecond}
-				conn, err := dialer.DialContext(ctx, "tcp", address)
+				if gate != nil {
+					select {
+					case <-gate:
+					case <-ctx.Done():
+						return
+					}
+				}
+				firstTimeout := cfg.PortScanTimeout
+				if firstTimeout > 300 {
+					firstTimeout = 300
+				}
+				conn, err := (&net.Dialer{Timeout: time.Duration(firstTimeout) * time.Millisecond}).DialContext(ctx, "tcp", address)
 				if err != nil && !errors.Is(err, syscall.ECONNREFUSED) && ctx.Err() == nil {
-					conn, err = dialer.DialContext(ctx, "tcp", address)
+					if gate != nil {
+						select {
+						case <-gate:
+						case <-ctx.Done():
+							return
+						}
+					}
+					conn, err = (&net.Dialer{Timeout: time.Duration(cfg.PortScanTimeout) * time.Millisecond}).DialContext(ctx, "tcp", address)
 				}
 				if err == nil {
 					_ = conn.Close()
@@ -338,14 +386,14 @@ func scanPortRange(ctx context.Context, cfg Config) ([]string, error) {
 			}
 		}()
 	}
-	for _, host := range cfg.Targets {
+	for _, host := range hosts {
 		for port := cfg.PortScanStart; port <= cfg.PortScanEnd; port++ {
 			select {
 			case jobs <- targetPort{host, port}:
 			case <-ctx.Done():
 				close(jobs)
 				wg.Wait()
-				return nil, ctx.Err()
+				return nil, nil, ctx.Err()
 			}
 		}
 	}
@@ -358,13 +406,24 @@ func scanPortRange(ctx context.Context, cfg Config) ([]string, error) {
 		return found[i].port < found[j].port
 	})
 	if len(found)*len(cfg.Paths) > 4096 {
-		return nil, errors.New("open ports exceed 4096 MCP candidates; reduce range or paths")
+		return nil, nil, errors.New("open ports exceed 4096 MCP candidates; reduce range or paths")
 	}
-	var targets []string
+	targets := append([]string(nil), explicit...)
+	openByHost := map[string]bool{}
 	for _, job := range found {
+		openByHost[job.host] = true
 		targets = append(targets, net.JoinHostPort(job.host, fmt.Sprint(job.port)))
 	}
-	return targets, nil
+	var noOpen []Result
+	reported := map[string]bool{}
+	for _, host := range hosts {
+		if openByHost[host] || reported[host] {
+			continue
+		}
+		reported[host] = true
+		noOpen = append(noOpen, Result{SchemaVersion: SchemaVersion, Scanner: "mcpenum", Target: Target{Input: host, Host: host}, ScanStatus: "completed", Services: []Service{}, Observations: []Observation{}, Warnings: []string{fmt.Sprintf("no open TCP ports in %d-%d", cfg.PortScanStart, cfg.PortScanEnd)}})
+	}
+	return targets, noOpen, nil
 }
 
 func expandTargets(cfg Config) ([]string, error) {
@@ -610,14 +669,14 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 	}
 	if svc.Detection.Status != "confirmed" {
 		// A failed modern probe is not evidence of MCP. Try one legacy handshake.
-		init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
+		init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": ClientVersion}}, "discovery")
 		if init.ResolvedPath != "" && !init.ResolvedHasQuery {
 			svc.Endpoint = init.ResolvedPath
 		}
 		initID := lastID(r)
 		if init.RPC.Error != nil && init.RPC.Error.Code == -32022 {
 			if offered := legacyOffer(init.RPC.Error.Data); offered != "" && offered != legacyVersion {
-				init = c.request(ctx, "initialize", map[string]any{"protocolVersion": offered, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
+				init = c.request(ctx, "initialize", map[string]any{"protocolVersion": offered, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": ClientVersion}}, "discovery")
 				if init.ResolvedPath != "" && !init.ResolvedHasQuery {
 					svc.Endpoint = init.ResolvedPath
 				}
@@ -666,7 +725,7 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 			}
 		} else if legacySSECandidate(c.endpoint.Path) && ctx.Err() == nil {
 			if e := c.startLegacySSE(ctx); e == nil {
-				init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
+				init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": ClientVersion}}, "discovery")
 				if init.Err == nil && init.RPC.Error == nil && acceptInitialize(init.RPC.Result, svc) {
 					c.era = "legacy"
 					c.version = svc.MCP.ProtocolVersion

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.0 - 2026-10-25
+
+- Make `mcpenum --target HOST` discover TCP ports 1–65535 by default, then test MCP candidates on every HTTP(S) port found.
+- Keep `HOST:PORT`, `--ports`, `--scan-ports`, and exact `--url` for scoped workflows; add `--no-port-scan` to test paths directly on selected ports.
+- Summarize confirmed MCP endpoints for each HTTP port in text output.
+- Bound the default full sweep with 256 workers, 500 TCP connections per second, and a retry for transient connection errors.
+- Report client version 0.2.0 in the User-Agent and MCP client metadata.
+
 ## v0.1.0 - 2026-10-25
 
 - Accept scan flags directly after `mcpenum`; remove the `scan` subcommand.

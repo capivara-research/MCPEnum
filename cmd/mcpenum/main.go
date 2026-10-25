@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -46,7 +47,7 @@ func run(args []string, out, errout io.Writer) error {
 	fs.SetOutput(errout)
 	var urls, targets, paths values
 	var targetsFile, pathsFile, ports, scanPorts, tokenEnv, tokenFile, format, pathProfile, colorMode string
-	var showSchemas, verbose, quiet bool
+	var showSchemas, verbose, quiet, noPortScan bool
 	var progressMode string
 	fs.Var(&urls, "url", "explicit MCP URL (repeatable)")
 	fs.Var(&targets, "target", "host or host:port (repeatable)")
@@ -54,10 +55,12 @@ func run(args []string, out, errout io.Writer) error {
 	fs.StringVar(&pathsFile, "paths-file", "", "file with one candidate path per line; combines with --path and replaces the built-in profile")
 	fs.StringVar(&pathProfile, "path-profile", "broad", "candidate paths for --target: standard (9), broad (17, default), or extensive (28)")
 	fs.StringVar(&targetsFile, "targets-file", "", "file with one host, host:port or URL per line")
-	fs.StringVar(&ports, "ports", "80,443,3000,8000,8080,8443", "TCP ports to check before MCP endpoint tests for --target")
-	fs.StringVar(&scanPorts, "scan-ports", "", "optional TCP discovery range, e.g. 1-65535; open ports receive MCP tests")
+	fs.StringVar(&ports, "ports", "", "limit --target HOST to selected TCP ports, e.g. 80,443,8000")
+	fs.StringVar(&scanPorts, "scan-ports", "", "TCP range for --target HOST (default 1-65535)")
+	fs.BoolVar(&noPortScan, "no-port-scan", false, "skip TCP and HTTP port checks; requires an exact URL or selected target port")
 	fs.IntVar(&cfg.PortScanWorkers, "port-workers", cfg.PortScanWorkers, "concurrent TCP checks for --scan-ports")
 	fs.IntVar(&cfg.PortScanTimeout, "port-timeout-ms", cfg.PortScanTimeout, "per-port TCP timeout for --scan-ports")
+	fs.IntVar(&cfg.PortScanRate, "port-rate", cfg.PortScanRate, "maximum TCP connects per second (0: no pacing)")
 	fs.StringVar(&cfg.Scheme, "scheme", cfg.Scheme, "scheme for --target: auto (detect TLS on open ports), http, or https")
 	fs.StringVar(&tokenEnv, "token-env", "", "environment variable holding Bearer token")
 	fs.StringVar(&tokenFile, "token-file", "", "file holding Bearer token")
@@ -88,6 +91,17 @@ func run(args []string, out, errout io.Writer) error {
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("unexpected positional argument %q; run mcpenum --help", fs.Args()[0])
 	}
+	var portsSet, scanPortsSet, httpProbeExplicit bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "ports":
+			portsSet = true
+		case "scan-ports":
+			scanPortsSet = true
+		case "http-probe":
+			httpProbeExplicit = true
+		}
+	})
 	if format != "text" && format != "json" && format != "jsonl" {
 		return errors.New("format must be text, json, or jsonl")
 	}
@@ -158,12 +172,21 @@ func run(args []string, out, errout io.Writer) error {
 	} else if pathsFile != "" {
 		return errors.New("paths file has no candidate paths")
 	}
-	parsed, e := parsePorts(ports)
-	if e != nil {
-		return e
+	if portsSet {
+		parsed, e := parsePorts(ports)
+		if e != nil {
+			return e
+		}
+		cfg.Ports = parsed
+		cfg.PortScanStart, cfg.PortScanEnd = 0, 0
 	}
-	cfg.Ports = parsed
-	if scanPorts != "" {
+	if scanPortsSet {
+		if portsSet {
+			return errors.New("choose --ports or --scan-ports, not both")
+		}
+		if noPortScan {
+			return errors.New("--no-port-scan cannot be combined with --scan-ports")
+		}
 		parts := strings.Split(scanPorts, "-")
 		if len(parts) != 2 {
 			return errors.New("--scan-ports expects START-END")
@@ -198,6 +221,32 @@ func run(args []string, out, errout io.Writer) error {
 		if e := scanner.Err(); e != nil {
 			return e
 		}
+	}
+	if noPortScan {
+		cfg.PortDiscovery = false
+		cfg.PortScanStart, cfg.PortScanEnd = 0, 0
+		if !portsSet {
+			for _, target := range cfg.Targets {
+				if _, _, err := net.SplitHostPort(target); err != nil {
+					return fmt.Errorf("--no-port-scan needs --ports or a host:port target (got %q)", target)
+				}
+			}
+		}
+	}
+	if portsSet || scanPortsSet {
+		bare := false
+		for _, target := range cfg.Targets {
+			if _, _, err := net.SplitHostPort(target); err != nil {
+				bare = true
+				break
+			}
+		}
+		if !bare {
+			return errors.New("--ports and --scan-ports require a host target without an explicit port")
+		}
+	}
+	if !httpProbeExplicit && (noPortScan || len(cfg.Targets) == 0) {
+		cfg.HTTPProbe = "off"
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -269,5 +318,5 @@ func parsePorts(s string) ([]int, error) {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum --target 127.0.0.1:8000\n  mcpenum --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum --target host.example --scan-ports 1-65535\n\nRun mcpenum --help for all options or mcpenum --version for build information.")
+	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum --target host.example                 # scan TCP ports 1-65535\n  mcpenum --target host.example:8000            # check one port\n  mcpenum --target host.example --ports 80,443  # limit ports\n  mcpenum --url http://127.0.0.1:8000/mcp       # exact endpoint\n\nRun mcpenum --help for all options or mcpenum --version for build information.")
 }

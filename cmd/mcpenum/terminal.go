@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -38,6 +40,7 @@ func printResultsStyled(w io.Writer, results []mcprecon.Result, showSchemas, col
 		}
 	}
 	fmt.Fprintf(w, "DISCOVERY SUMMARY  candidates: %d | MCP endpoints: %d | aliases: %d | inconclusive: %d | other: %d\n\n", len(results), confirmed, len(aliases), inconclusive, len(results)-confirmed-len(aliases)-inconclusive)
+	printHTTPPortsSummary(w, results, color)
 	seenPorts := map[string]bool{}
 	for _, result := range results {
 		if result.PortInfo != nil && !seenPorts[result.PortInfo.Origin] {
@@ -68,6 +71,9 @@ func printResultsStyled(w io.Writer, results []mcprecon.Result, showSchemas, col
 				state = "MCP " + statusLabel(result.Services[0].Detection.Status)
 			} else if result.ScanStatus == "failed" {
 				state = "probe failed"
+				if result.PortInfo != nil && result.PortInfo.TCPState == "open" {
+					state = "TCP open; HTTP unconfirmed"
+				}
 			}
 			outcome := bestProbeOutcome(result.Observations)
 			if outcome != "" {
@@ -80,10 +86,67 @@ func printResultsStyled(w io.Writer, results []mcprecon.Result, showSchemas, col
 	}
 }
 
+func printHTTPPortsSummary(w io.Writer, results []mcprecon.Result, color bool) {
+	type row struct {
+		endpoints []string
+		seen      map[string]bool
+	}
+	ports := map[string]*row{}
+	for _, result := range results {
+		origin := result.Target.Scheme + "://" + net.JoinHostPort(result.Target.Host, strconv.Itoa(result.Target.Port))
+		httpSeen := false
+		if result.PortInfo != nil {
+			for _, probe := range result.PortInfo.Probes {
+				if probe.Status > 0 {
+					httpSeen = true
+					break
+				}
+			}
+		}
+		for _, obs := range result.Observations {
+			if obs.HTTPStatus > 0 {
+				httpSeen = true
+				break
+			}
+		}
+		if !httpSeen {
+			continue
+		}
+		if ports[origin] == nil {
+			ports[origin] = &row{seen: map[string]bool{}}
+		}
+		for _, service := range result.Services {
+			if service.Detection.Status == "confirmed" && !ports[origin].seen[service.Endpoint] {
+				ports[origin].seen[service.Endpoint] = true
+				ports[origin].endpoints = append(ports[origin].endpoints, service.Endpoint)
+			}
+		}
+	}
+	if len(ports) == 0 {
+		return
+	}
+	section(w, "HTTP PORTS", color)
+	keys := make([]string, 0, len(ports))
+	for origin := range ports {
+		keys = append(keys, origin)
+	}
+	sort.Strings(keys)
+	for _, origin := range keys {
+		endpoints := ports[origin].endpoints
+		sort.Strings(endpoints)
+		state := "MCP not confirmed"
+		if len(endpoints) > 0 {
+			state = "MCP: " + strings.Join(endpoints, ", ")
+		}
+		fmt.Fprintf(w, "  %s  %s\n", safeLine(origin), safeLine(state))
+	}
+	fmt.Fprintln(w)
+}
+
 func confirmedEndpointKey(result mcprecon.Result) string {
 	for _, service := range result.Services {
 		if service.Detection.Status == "confirmed" {
-			return fmt.Sprintf("%s://%s:%d%s", result.Target.Scheme, result.Target.Host, result.Target.Port, service.Endpoint)
+			return result.Target.Scheme + "://" + net.JoinHostPort(result.Target.Host, strconv.Itoa(result.Target.Port)) + service.Endpoint
 		}
 	}
 	return result.Target.Input

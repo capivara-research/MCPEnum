@@ -6,6 +6,7 @@ import (
 )
 
 const SchemaVersion = "2.0"
+const ClientVersion = "0.2.0"
 
 type Config struct {
 	URLs            []string
@@ -32,6 +33,7 @@ type Config struct {
 	PortScanEnd     int
 	PortScanWorkers int
 	PortScanTimeout int                 // milliseconds per TCP connection
+	PortScanRate    int                 // maximum TCP connects per second; zero disables pacing
 	Progress        func(ProgressEvent) // optional scan telemetry; callbacks may be concurrent
 }
 

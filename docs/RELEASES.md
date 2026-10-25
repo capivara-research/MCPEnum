@@ -5,11 +5,11 @@ Each tagged release includes Linux amd64/arm64, macOS amd64/arm64, and Windows a
 On Linux amd64, for example:
 
 ```sh
-curl -fLO https://github.com/capivara-research/MCPEnum/releases/download/v0.1.0/mcpenum_v0.1.0_linux_amd64.tar.gz
-curl -fLO https://github.com/capivara-research/MCPEnum/releases/download/v0.1.0/checksums.txt
-grep 'mcpenum_v0.1.0_linux_amd64.tar.gz' checksums.txt | sha256sum -c -
-gh attestation verify mcpenum_v0.1.0_linux_amd64.tar.gz --repo capivara-research/MCPEnum
-tar -xzf mcpenum_v0.1.0_linux_amd64.tar.gz mcpenum
+curl -fLO https://github.com/capivara-research/MCPEnum/releases/download/v0.2.0/mcpenum_v0.2.0_linux_amd64.tar.gz
+curl -fLO https://github.com/capivara-research/MCPEnum/releases/download/v0.2.0/checksums.txt
+grep 'mcpenum_v0.2.0_linux_amd64.tar.gz' checksums.txt | sha256sum -c -
+gh attestation verify mcpenum_v0.2.0_linux_amd64.tar.gz --repo capivara-research/MCPEnum
+tar -xzf mcpenum_v0.2.0_linux_amd64.tar.gz mcpenum
 sudo install -m 0755 mcpenum /usr/local/bin/mcpenum
 mcpenum --version
 ```

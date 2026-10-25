@@ -117,7 +117,7 @@ func (c *client) request(ctx context.Context, method string, params map[string]a
 		params["_meta"] = map[string]any{
 			"io.modelcontextprotocol/protocolVersion":    modernVersion,
 			"io.modelcontextprotocol/clientCapabilities": map[string]any{},
-			"io.modelcontextprotocol/clientInfo":         map[string]any{"name": "MCPEnum", "version": "0.1.0"},
+			"io.modelcontextprotocol/clientInfo":         map[string]any{"name": "MCPEnum", "version": ClientVersion},
 		}
 	}
 	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})

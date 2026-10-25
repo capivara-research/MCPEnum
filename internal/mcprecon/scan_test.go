@@ -108,6 +108,38 @@ func TestPortRangeChecksOpenPortBeforePaths(t *testing.T) {
 	}
 }
 
+func TestDefaultFullRangeAndExplicitPortSelection(t *testing.T) {
+	cfg := Defaults()
+	if cfg.PortScanStart != 1 || cfg.PortScanEnd != 65535 {
+		t.Fatalf("default range should cover all TCP ports: %d-%d", cfg.PortScanStart, cfg.PortScanEnd)
+	}
+	cfg.Targets = []string{"127.0.0.1:8000"}
+	targets, _, err := scanPortRange(context.Background(), cfg)
+	if err != nil || len(targets) != 1 || targets[0] != "127.0.0.1:8000" {
+		t.Fatalf("explicit port must bypass full sweep: %v, %v", targets, err)
+	}
+}
+
+func TestNoOpenRangeReturnsNegativeResult(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	cfg := testDefaults()
+	cfg.Targets = []string{"127.0.0.1"}
+	cfg.PortScanStart, cfg.PortScanEnd = port, port
+	cfg.PortScanRate = 0
+	results, err := Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ScanStatus != "completed" || len(results[0].Warnings) != 1 || !strings.Contains(results[0].Warnings[0], "no open TCP ports") {
+		t.Fatalf("expected a completed negative result: %+v", results)
+	}
+}
+
 func TestOpenNonHTTPPortSkipsMCPPaths(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
