@@ -21,6 +21,7 @@ func printResultStyled(w io.Writer, r mcprecon.Result, showSchemas, color bool) 
 	fmt.Fprintf(w, "Result: %s | %d requests | %d ms\n", statusLabel(r.ScanStatus), r.Metrics.Requests, r.Metrics.DurationMS)
 	if len(r.Services) == 0 {
 		fmt.Fprintln(w, "Summary: MCP not confirmed")
+		printUnconfirmed(w, r.Observations, color)
 		printWarnings(w, r.Warnings, color)
 		fmt.Fprintln(w)
 		return
@@ -31,6 +32,29 @@ func printResultStyled(w io.Writer, r mcprecon.Result, showSchemas, color bool) 
 	}
 	printWarnings(w, r.Warnings, color)
 	fmt.Fprintln(w)
+}
+
+func printUnconfirmed(w io.Writer, observations []mcprecon.Observation, color bool) {
+	if len(observations) == 0 {
+		return
+	}
+	section(w, "PROBE OBSERVATIONS", color)
+	for _, obs := range observations {
+		if obs.Phase != "discovery" {
+			continue
+		}
+		outcome := "no HTTP response"
+		if obs.HTTPStatus > 0 {
+			outcome = fmt.Sprintf("HTTP %d", obs.HTTPStatus)
+		}
+		if obs.ErrorCode != "" {
+			outcome += " (" + safeLine(obs.ErrorCode) + ")"
+		} else if obs.RPCCode != 0 {
+			outcome += fmt.Sprintf(" (JSON-RPC %d)", obs.RPCCode)
+		}
+		fmt.Fprintf(w, "  %s: %s\n", safeLine(obs.Method), outcome)
+	}
+	fmt.Fprintln(w, "  Next: check the scheme and port; try authorized alternate paths with --target or --path.")
 }
 
 func printSummary(w io.Writer, services []mcprecon.Service) {

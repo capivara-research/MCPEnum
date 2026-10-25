@@ -89,6 +89,8 @@ If you know the host but not the endpoint, use `--target` to try selected ports 
 
 `--target` tests each selected port/path combination; `--url` does **not** search alternate paths. Neither mode discovers arbitrary paths or ports. A normal web API, incorrect path, unreachable port, unsupported stdio-only server, or access control that prevents confirmation cannot produce a valid MCP inventory. See [result states](#reading-the-results-correctly) before interpreting an empty report.
 
+If a candidate is not confirmed as MCP, the text report shows the discovery requests and observed HTTP status or error category. For example, a missing path can show `server/discover: HTTP 404` and `initialize: HTTP 404`. This is evidence about that candidate path, not a conclusion about every path on the host. Use `--path` to add a custom path within your authorized scope.
+
 ## What MCPEnum looks for
 
 | Area | Data collected | How it is interpreted |
@@ -366,7 +368,7 @@ These are local fixtures, not claims about every MCP implementation. The CI job 
 | Question or symptom | What to check |
 |---|---|
 | **Can I use another IP or endpoint?** | Yes. Give the full reachable HTTP(S) endpoint with `--url`, or use `--target` with selected ports and paths. `127.0.0.1` is only an example. |
-| **The command says “MCP not confirmed.”** | Check the scheme, port, and path. An explicit `--url` does not try other paths; the service may be stdio-only or may not be MCP. Inspect JSON observations for HTTP and JSON-RPC responses. |
+| **The command says “MCP not confirmed.”** | Read `PROBE OBSERVATIONS` for HTTP status or error category. Check the scheme, port, and path. An explicit `--url` does not try other paths; the service may be stdio-only or may not be MCP. JSON retains the full observations. |
 | **I received 401/403.** | A generic HTTP challenge does not prove MCP. If you have a scoped Bearer token, use `--token-env` or `--token-file` and compare both inventories. |
 | **The port is closed or DNS fails.** | Check reachability, routing, VPN state, firewall, scheme, and port. JSON warnings distinguish connection, DNS, and TLS errors when possible. |
 | **The TLS certificate is untrusted.** | Use a valid certificate for normal operation. `--insecure` is available for controlled test environments. |
