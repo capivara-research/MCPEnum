@@ -370,7 +370,7 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 					c.era = "legacy"
 					c.version = svc.MCP.ProtocolVersion
 					svc.MCP.Transport = "legacy_http_sse"
-					svc.MCP.Session = "unknown"
+					svc.MCP.Session = legacySSESessionState(c.legacy.postURL)
 					svc.Detection = Detection{Status: "confirmed", Confidence: "high", EvidenceIDs: []string{lastID(r)}}
 					_ = c.notify(ctx, "notifications/initialized")
 				}

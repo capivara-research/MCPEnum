@@ -400,6 +400,8 @@ The tests cover modern discovery, older version negotiation, pagination, authent
 
 These are local fixtures, not claims about every MCP implementation. The CI job runs tests, `go vet`, and a build on Ubuntu. The tool does not need Nmap installed. [How MCPEnum performs a scan](docs/TECHNICAL.md) describes the request flow in more detail.
 
+A separate [interoperability validation](docs/VALIDATION.md) compares MCPEnum with the original Nmap MCP scripts across public Go, TypeScript, Python, and Rust server projects, including legacy SSE, a custom path, and per-command timing. It explains protocol-version differences and the limits of the local measurements.
+
 ## Troubleshooting and FAQ
 
 | Question or symptom | What to check |

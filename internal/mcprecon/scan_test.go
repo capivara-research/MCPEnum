@@ -347,7 +347,11 @@ func TestLegacyHTTPSSE(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/sse") && r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, "event: endpoint\ndata: /messages\n\n")
+			postPath := "/messages"
+			if r.URL.Path == "/sse" {
+				postPath += "?sessionId=private-test-session"
+			}
+			fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", postPath)
 			w.(http.Flusher).Flush()
 			for {
 				select {
@@ -405,6 +409,16 @@ func TestLegacyHTTPSSE(t *testing.T) {
 		}
 		if res[0].Services[0].MCP.Inventories["anonymous"].Tools.Status != "empty" {
 			t.Fatalf("SSE enumeration failed at %s", path)
+		}
+		wantSession := "unknown"
+		if path == "/sse" {
+			wantSession = "stateful"
+		}
+		if got := res[0].Services[0].MCP.Session; got != wantSession {
+			t.Fatalf("path=%s session=%s, want %s", path, got, wantSession)
+		}
+		if b, _ := json.Marshal(res); strings.Contains(string(b), "private-test-session") {
+			t.Fatal("legacy SSE session identifier leaked")
 		}
 	}
 }

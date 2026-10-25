@@ -58,6 +58,19 @@ type legacySSE struct {
 	cancel   context.CancelFunc
 }
 
+// The legacy SSE endpoint event can carry a session identifier in the POST
+// URL. Its value is used for requests but must never appear in scan output.
+func legacySSESessionState(postURL *url.URL) string {
+	if postURL != nil {
+		for _, key := range []string{"sessionId", "session_id"} {
+			if postURL.Query().Get(key) != "" {
+				return "stateful"
+			}
+		}
+	}
+	return "unknown"
+}
+
 func newClient(rawURL string, cfg Config, token string, result *Result) (*client, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" {
