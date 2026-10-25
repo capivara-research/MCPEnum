@@ -35,7 +35,7 @@ func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"http://127.0.0.1:8000/mcp", "http://127.0.0.1:8000/", "http://127.0.0.1:8000/messages"} {
+	for _, expected := range []string{"http://127.0.0.1:8000/mcp", "http://127.0.0.1:8000/", "http://127.0.0.1:8000/messages", "http://127.0.0.1:8000/api/v1/mcp"} {
 		if !containsURL(urls, expected) {
 			t.Errorf("standard discovery missing %s", expected)
 		}
@@ -80,6 +80,27 @@ func TestNonMCPResponseKeepsHTTPFingerprint(t *testing.T) {
 	}
 	if got := results[0].Observations[0].HTTPServer; got != "fixture-http" {
 		t.Fatalf("HTTP server header = %q", got)
+	}
+}
+
+func TestMissingSSEPathIsNotInconclusive(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "fixture-http")
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer s.Close()
+	cfg := Defaults()
+	cfg.URLs = []string{s.URL + "/sse"}
+	results, err := Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := results[0]
+	if got.ScanStatus != "completed" || len(got.Services) != 0 || len(got.Observations) != 3 {
+		t.Fatalf("missing SSE route should be a completed negative probe: %+v", got)
+	}
+	if got.Observations[2].Method != "GET" || got.Observations[2].HTTPStatus != 404 {
+		t.Fatalf("missing SSE GET evidence: %+v", got.Observations[2])
 	}
 }
 

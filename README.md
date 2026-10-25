@@ -24,7 +24,7 @@ go build -o mcpenum ./cmd/mcpenum
 ./mcpenum scan --target 127.0.0.1 --ports 8000
 ```
 
-Replace `127.0.0.1` and `8000` with an authorized host and port. This command tries seven common MCP paths on that port, including `/mcp`, `/`, and `/sse`. It does not discover arbitrary paths. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
+Replace `127.0.0.1` and `8000` with an authorized host and port. This command tries eight common MCP paths on that port, including `/mcp`, `/api/v1/mcp`, `/`, and `/sse`. It does not discover arbitrary paths. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
 
 An alternative installation, verified against this repository, is:
 
@@ -95,8 +95,8 @@ The MCP specification requires an HTTP endpoint, but does not prescribe its path
 
 | Path profile | Candidates per selected port | When to use |
 |---|---:|---|
-| `standard` (default) | 7 | Quick check of common roots and MCP/SSE routes. |
-| `broad` | 15 | More legacy and gateway-style routes. |
+| `standard` (default) | 8 | Quick check of common roots, versioned API, and MCP/SSE routes. |
+| `broad` | 16 | More legacy and gateway-style routes. |
 | `extensive` | 27 | Additional nested, versioned, trailing-slash, and SSE routes. |
 
 The 27 paths are heuristics, not a standard or an exhaustive list. Each candidate can require two discovery POSTs, with an additional GET for an SSE fallback; confirmed endpoints also receive list requests. Generic web applications may log or handle those POSTs, so select only authorized hosts and paths. Larger profiles increase traffic and output. When two paths redirect to one MCP endpoint, text output marks the second as an alias; JSON keeps both candidate results and their redirect evidence. Use `--rate`, `--workers`, and time budgets when scanning many hosts.
@@ -233,7 +233,7 @@ An explicit `--url` probes only that URL. If the path is omitted, `/mcp` is used
 ./mcpenum scan --target mcp.example.test --ports 443,8000 --path /mcp --path /api/mcp
 ```
 
-With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the seven standard paths are listed [above](#choosing-an-ip-and-endpoint). Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
+With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the eight standard paths are listed [above](#choosing-an-ip-and-endpoint). Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
 
 ### Scan multiple authorized targets
 
@@ -300,7 +300,7 @@ For scans with multiple candidate paths, terminal output starts with a discovery
 | `--ports LIST` | `443,3000,8000,8080` | Comma-separated ports or short ranges for `--target`. |
 | `--path PATH` | Seven standard paths | Candidate path for `--target`; repeatable and replaces the path profile. |
 | `--paths-file FILE` | — | Read candidate paths, one per line; combines with `--path` and replaces the profile. |
-| `--path-profile` | `standard` | `standard` (7), `broad` (15), or `extensive` (27) candidate paths for `--target`. |
+| `--path-profile` | `standard` | `standard` (8), `broad` (16), or `extensive` (27) candidate paths for `--target`. |
 | `--format` | `text` | `text`, `json`, or `jsonl`. |
 | `--color` | `auto` | `auto`, `always`, or `never` for text output. `NO_COLOR` is respected in auto mode. |
 | `--schemas` | off | Include full tool input schemas in text output. |

@@ -49,7 +49,7 @@ Adding `-sV` makes Nmap show its general service fingerprint too. In these local
 
 ## Unknown-path discovery
 
-The FastMCP fixture's path, `/api/v1/mcp`, was not supplied to either scanner in this check:
+The FastMCP fixture's path, `/api/v1/mcp`, was not supplied to either scanner in the initial check:
 
 | Search configuration | Candidates | Requests reported by MCPEnum | Found MCP? | Wall time |
 |---|---:|---:|---|---:|
@@ -58,14 +58,24 @@ The FastMCP fixture's path, `/api/v1/mcp`, was not supplied to either scanner in
 | MCPEnum `--path-profile extensive` | 27 | 61 | Yes, `/api/v1/mcp` | 45 ms |
 | Nmap scripts, default paths | 15 | Not reported | No | 15,290 ms |
 
-With `/api/v1/mcp` passed explicitly, Nmap confirmed the service and listed the same one tool, one resource, and one prompt. This test shows why a missed default path must be reported as *not found within the chosen candidates*, never as proof that the host has no MCP endpoint. The broader MCPEnum profile spends more requests to cover versioned and nested paths; it still cannot infer arbitrary private prefixes.
+The missed FastMCP route was a useful coverage gap. MCPEnum now includes `/api/v1/mcp` in both the default and broad profiles. A fresh local check, again without an explicit path, produced:
+
+| MCPEnum profile after fix | Candidates | Requests | Found MCP? | Wall time |
+|---|---:|---:|---|---:|
+| `standard` | 8 | 20 | Yes; 1 tool, 1 resource, 1 prompt | 24 ms |
+| `broad` | 16 | 37 | Yes; 1 tool, 1 resource, 1 prompt | 30 ms |
+| `extensive` | 27 | 61 | Yes; 1 tool, 1 resource, 1 prompt | 62 ms |
+
+With `/api/v1/mcp` passed explicitly, Nmap confirmed the service and listed the same one tool, one resource, and one prompt. Its default path list remains unchanged. A missed default path must be reported as *not found within the chosen candidates*, never as proof that the host has no MCP endpoint. The broader MCPEnum profiles spend more requests to cover other nested and legacy paths; no profile can infer arbitrary private prefixes.
+
+The first post-change text report classified the non-existent `/sse` candidate as `inconclusive` despite three HTTP 404 responses. That state was corrected: a modern discovery 404, legacy initialize 404, and SSE GET 404/405 now produce a completed negative candidate. A regression test and a repeat of the FastMCP default scan confirmed `MCP endpoints: 1 | inconclusive: 0`.
 
 ```sh
-./mcpenum scan --target 127.0.0.1 --ports 14004 --path-profile extensive
+./mcpenum scan --target 127.0.0.1 --ports 14004
 ```
 
 ## Assessment and limits
 
-MCPEnum produced complete, correctly separated inventories across the tested Go, TypeScript, Python, and Rust servers, including Streamable HTTP, legacy SSE, and a custom route. Its measured command time was lower than Nmap's in every local exact-endpoint run, but a single loopback run is insufficient to establish a general speed ratio. The protocol-version and TypeScript tool-count differences follow the servers' negotiated behavior. The SSE session-reporting gap was corrected and retested; no inventory-count defect was found in these fixtures.
+MCPEnum produced complete, correctly separated inventories across the tested Go, TypeScript, Python, and Rust servers, including Streamable HTTP, legacy SSE, and a custom route. Its measured command time was lower than Nmap's in every local exact-endpoint run, but a single loopback run is insufficient to establish a general speed ratio. The protocol-version and TypeScript tool-count differences follow the servers' negotiated behavior. The SSE session-reporting, default-path coverage, and missing-SSE classification gaps were corrected and retested; no inventory-count defect was found in these fixtures.
 
 This is inventory validation, not execution or vulnerability testing. It does not establish that listed tools are callable, that access controls are correct, or that the scanner covers every MCP implementation. Repeat the same checks on a new server version before relying on the counts. Keep `--url` or a scoped `--path` list for known routes; use `extensive` when the route is unknown and the extra requests fit the scan budget.

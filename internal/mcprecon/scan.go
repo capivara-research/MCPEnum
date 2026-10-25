@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-var standardPaths = []string{"/mcp", "/", "/sse", "/api/mcp", "/mcp/v1", "/v1/mcp", "/messages"}
-var broadPaths = []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
+var standardPaths = []string{"/mcp", "/", "/sse", "/api/mcp", "/api/v1/mcp", "/mcp/v1", "/v1/mcp", "/messages"}
+var broadPaths = []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/api/v1/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
 var extensivePaths = []string{
 	"/mcp", "/", "/sse", "/api/mcp", "/mcp/v1", "/v1/mcp", "/messages",
 	"/mcp/", "/api/mcp/", "/api/v1/mcp", "/api/v2/mcp", "/server/mcp", "/mcp/server",
@@ -376,8 +376,18 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 				}
 			}
 		}
-		if svc.Detection.Status != "confirmed" && (disc.HTTPStatus == 404 || disc.HTTPStatus == 405) && (init.HTTPStatus == 404 || init.HTTPStatus == 405) && !strings.HasSuffix(c.endpoint.Path, "/sse") {
-			return nil, "unknown"
+		if svc.Detection.Status != "confirmed" && (disc.HTTPStatus == 404 || disc.HTTPStatus == 405) && (init.HTTPStatus == 404 || init.HTTPStatus == 405) {
+			if !strings.HasSuffix(c.endpoint.Path, "/sse") {
+				return nil, "unknown"
+			}
+			// For an SSE candidate, the GET is the last transport attempt.
+			// A 404/405 there closes the case just as it does for the POSTs.
+			if n := len(r.Observations); n > 0 {
+				last := r.Observations[n-1]
+				if last.Method == "GET" && (last.HTTPStatus == 404 || last.HTTPStatus == 405) {
+					return nil, "unknown"
+				}
+			}
 		}
 	}
 	if svc.Detection.Status != "confirmed" {
