@@ -104,9 +104,9 @@ func TestPathsFileFindsCustomMountedEndpoint(t *testing.T) {
 	}
 }
 
-func TestTargetWithoutEndpointFindsNmapCandidateRPC(t *testing.T) {
+func TestTargetWithoutEndpointFindsSecListsMCPCandidate(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rpc" {
+		if r.URL.Path != "/mcp/transport" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -145,18 +145,18 @@ func TestTargetWithoutEndpointFindsNmapCandidateRPC(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 16 {
-		t.Fatalf("expected 16 default paths, got %d", len(results))
+	if len(results) != 17 {
+		t.Fatalf("expected 17 default paths, got %d", len(results))
 	}
 	for _, result := range results {
 		if len(result.Services) == 1 && result.Services[0].Detection.Status == "confirmed" {
-			if result.Services[0].Endpoint != "/rpc" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
+			if result.Services[0].Endpoint != "/mcp/transport" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
 				t.Fatalf("wrong discovered endpoint or inventory: %+v", result.Services[0])
 			}
 			return
 		}
 	}
-	t.Fatal("/rpc was not discovered without an explicit endpoint")
+	t.Fatal("/mcp/transport was not discovered without an explicit endpoint")
 }
 
 func TestTerminalColorModes(t *testing.T) {

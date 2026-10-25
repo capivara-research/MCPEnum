@@ -24,7 +24,7 @@ go build -o mcpenum ./cmd/mcpenum
 ./mcpenum scan --target 127.0.0.1:8000
 ```
 
-Replace `127.0.0.1:8000` with an authorized host and port. You do not need to know the MCP endpoint: this command tries 16 candidate paths and reports the confirmed path. It does not discover arbitrary paths or scan other ports. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
+Replace `127.0.0.1:8000` with an authorized host and port. You do not need to know the MCP endpoint: this command tries 17 candidate paths and reports the confirmed path. It does not discover arbitrary paths or scan other ports. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
 
 An alternative installation, verified against this repository, is:
 
@@ -86,11 +86,11 @@ The MCP specification requires an HTTP endpoint, but does not prescribe its path
 
 | Path profile | Candidates per selected port | When to use |
 |---|---:|---|
-| `standard` | 8 | Faster check of common roots, versioned API, and MCP/SSE routes. |
-| `broad` (default) | 16 | All 15 paths in the pinned Nmap MCP script, plus `/api/v1/mcp`. |
-| `extensive` | 27 | Additional nested, versioned, trailing-slash, and SSE routes. |
+| `standard` | 9 | Quick check of common MCP/SSE routes, including `/mcp/transport`. |
+| `broad` (default) | 17 | Nmap’s 15 candidates, `/api/v1/mcp`, and SecLists’ `/mcp/transport`. |
+| `extensive` | 28 | Additional nested, versioned, trailing-slash, and SSE routes. |
 
-The default covers the candidate list in [`nmap-ai-recon` at `86e94bd`](https://github.com/insidetrust/nmap-ai-recon/blob/86e94bda9dbb1defc4aed61adb4b67b80e422c43/nselib/mcp.lua): `/mcp`, `/`, `/sse`, `/messages`, `/api/mcp`, `/mcp/v1`, `/v1/mcp`, `/rpc`, `/jsonrpc`, `/mcp/sse`, `/mcp/message`, `/mcp/messages`, `/stream`, `/api`, and `/server`. MCPEnum also tests `/api/v1/mcp` by default. These paths are heuristics, not a standard or an exhaustive list. Each candidate can require two discovery POSTs, with an additional GET for an SSE fallback; confirmed endpoints also receive list requests. Generic web applications may log or handle those POSTs, so select only authorized hosts and paths. Larger profiles increase traffic and output. When two paths redirect to one MCP endpoint, text output marks the second as an alias; JSON keeps both candidate results and their redirect evidence. Use `--rate`, `--workers`, and time budgets when scanning many hosts.
+The default covers the candidate list in [`nmap-ai-recon` at `86e94bd`](https://github.com/insidetrust/nmap-ai-recon/blob/86e94bda9dbb1defc4aed61adb4b67b80e422c43/nselib/mcp.lua): `/mcp`, `/`, `/sse`, `/messages`, `/api/mcp`, `/mcp/v1`, `/v1/mcp`, `/rpc`, `/jsonrpc`, `/mcp/sse`, `/mcp/message`, `/mcp/messages`, `/stream`, `/api`, and `/server`. MCPEnum also tests `/api/v1/mcp` and `/mcp/transport` by default. The latter is from SecLists’ [MCP server discovery list](https://github.com/danielmiessler/SecLists/blob/ab068333d7d44a9376e2037b0ed7d2e8ca5c6610/Discovery/Web-Content/mcp-server.txt); its other entries already overlap with the default candidates. The list is used as a curated reference; MCPEnum does not need SecLists installed at runtime. These paths are heuristics, not a standard or an exhaustive list. Each candidate can require two discovery POSTs, with an additional GET for an SSE fallback; confirmed endpoints also receive list requests. Generic web applications may log or handle those POSTs, so select only authorized hosts and paths. Larger profiles increase traffic and output. When two paths redirect to one MCP endpoint, text output marks the second as an alias; JSON keeps both candidate results and their redirect evidence. Use `--rate`, `--workers`, and time budgets when scanning many hosts.
 
 ```sh
 ./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile standard
@@ -148,7 +148,7 @@ For the exact request sequence, collection states, and evidence model, see [How 
 
 ## Example terminal output
 
-This discovery run was captured on 25 October 2026 against the authorized AI-RTA SecureCorp lab. It starts with only the host and port; MCPEnum checks the default set of 16 candidate paths (the 15 used by Nmap's MCP discovery plus `/api/v1/mcp`). The example found two MCP endpoints. Response details and timings vary between runs.
+This discovery run was captured on 25 October 2026 against the authorized AI-RTA SecureCorp lab, before `/mcp/transport` was added from SecLists. It used only host and port and tested 16 paths, finding two MCP endpoints. The current defaults test 17 candidate paths. Response details and timings vary between runs.
 
 ```sh
 ./mcpenum scan --target 172.16.12.2:8000 --rate 10 --progress always
@@ -202,7 +202,7 @@ For a per-request trace while diagnosing a slow or partial scan, use `--verbose`
 ./mcpenum scan --target mcp.example.test --ports 443,8000 --path /mcp --path /api/mcp
 ```
 
-With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the 16 default candidate paths are listed [above](#choosing-an-ip-and-endpoint). A `host:port` target scans that port only. Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
+With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the 17 default candidate paths are listed [above](#choosing-an-ip-and-endpoint). A `host:port` target scans that port only. Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
 
 ### Scan multiple authorized targets
 
@@ -267,9 +267,9 @@ For scans with multiple candidate paths, terminal output starts with a discovery
 | `--target HOST[:PORT]` | — | Expand host with selected ports and paths; repeatable. |
 | `--targets-file FILE` | — | Read URLs or hosts, one per line. |
 | `--ports LIST` | `443,3000,8000,8080` | Comma-separated ports or short ranges for `--target`. |
-| `--path PATH` | 16 broad-profile paths | Candidate path for `--target`; repeatable and replaces the path profile. |
+| `--path PATH` | 17 broad-profile paths | Candidate path for `--target`; repeatable and replaces the path profile. |
 | `--paths-file FILE` | — | Read candidate paths, one per line; combines with `--path` and replaces the profile. |
-| `--path-profile` | `broad` | `standard` (8), `broad` (16), or `extensive` (27) candidate paths for `--target`. |
+| `--path-profile` | `broad` | `standard` (9), `broad` (17), or `extensive` (28) candidate paths for `--target`. |
 | `--format` | `text` | `text`, `json`, or `jsonl`. |
 | `--color` | `auto` | `auto`, `always`, or `never` for text output. `NO_COLOR` is respected in auto mode. |
 | `--schemas` | off | Include full tool input schemas in text output. |

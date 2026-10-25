@@ -48,7 +48,7 @@ func run(args []string, out, errout io.Writer) error {
 	fs.Var(&targets, "target", "host or host:port (repeatable)")
 	fs.Var(&paths, "path", "candidate path for --target (repeatable)")
 	fs.StringVar(&pathsFile, "paths-file", "", "file with one candidate path per line; combines with --path and replaces the built-in profile")
-	fs.StringVar(&pathProfile, "path-profile", "broad", "candidate paths for --target: standard (8), broad (16, default), or extensive (27)")
+	fs.StringVar(&pathProfile, "path-profile", "broad", "candidate paths for --target: standard (9), broad (17, default), or extensive (28)")
 	fs.StringVar(&targetsFile, "targets-file", "", "file with one host, host:port or URL per line")
 	fs.StringVar(&ports, "ports", "443,3000,8000,8080", "TCP ports for --target")
 	fs.StringVar(&tokenEnv, "token-env", "", "environment variable holding Bearer token")

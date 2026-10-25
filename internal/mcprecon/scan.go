@@ -19,13 +19,14 @@ import (
 	"time"
 )
 
-var standardPaths = []string{"/mcp", "/", "/sse", "/api/mcp", "/api/v1/mcp", "/mcp/v1", "/v1/mcp", "/messages"}
-var broadPaths = []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/api/v1/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
+// /mcp/transport is also present in SecLists mcp-server.txt at ab068333d7d44a9376e2037b0ed7d2e8ca5c6610.
+var standardPaths = []string{"/mcp", "/", "/sse", "/api/mcp", "/api/v1/mcp", "/mcp/v1", "/v1/mcp", "/messages", "/mcp/transport"}
+var broadPaths = []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/api/v1/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server", "/mcp/transport"}
 var extensivePaths = []string{
 	"/mcp", "/", "/sse", "/api/mcp", "/mcp/v1", "/v1/mcp", "/messages",
 	"/mcp/", "/api/mcp/", "/api/v1/mcp", "/api/v2/mcp", "/server/mcp", "/mcp/server",
 	"/rpc", "/jsonrpc", "/mcp/sse", "/api/sse", "/api/v1/sse", "/mcp/message", "/mcp/messages",
-	"/message", "/stream", "/api/stream", "/api", "/server", "/api/v1", "/mcp-server",
+	"/message", "/stream", "/api/stream", "/api", "/server", "/api/v1", "/mcp-server", "/mcp/transport",
 }
 
 func StandardPaths() []string  { return append([]string(nil), standardPaths...) }

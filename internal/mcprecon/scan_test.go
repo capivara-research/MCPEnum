@@ -42,12 +42,13 @@ func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The default includes all 15 candidate paths from nmap-ai-recon
-	// nselib/mcp.lua at 86e94bd, plus /api/v1/mcp observed in FastMCP.
+	// nselib/mcp.lua at 86e94bd, /api/v1/mcp observed in FastMCP,
+	// and /mcp/transport from SecLists mcp-server.txt.
 	nmapPaths := []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
-	if len(cfg.Paths) != 16 || len(urls) != 16 {
-		t.Fatalf("default discovery should test 16 paths, got %d config paths and %d URLs", len(cfg.Paths), len(urls))
+	if len(cfg.Paths) != 17 || len(urls) != 17 {
+		t.Fatalf("default discovery should test 17 paths, got %d config paths and %d URLs", len(cfg.Paths), len(urls))
 	}
-	for _, path := range append(nmapPaths, "/api/v1/mcp") {
+	for _, path := range append(nmapPaths, "/api/v1/mcp", "/mcp/transport") {
 		expected := "http://127.0.0.1:8000" + path
 		if !containsURL(urls, expected) {
 			t.Errorf("default discovery missing %s", expected)
@@ -55,17 +56,17 @@ func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
 	}
 	cfg.Paths = StandardPaths()
 	urls, err = expandTargets(cfg)
-	if err != nil || len(urls) != 8 || containsURL(urls, "http://127.0.0.1:8000/rpc") {
-		t.Fatalf("standard profile should remain the eight-path quick scan: %v, %v", urls, err)
+	if err != nil || len(urls) != 9 || !containsURL(urls, "http://127.0.0.1:8000/mcp/transport") || containsURL(urls, "http://127.0.0.1:8000/rpc") {
+		t.Fatalf("standard profile should remain the nine-path quick scan: %v, %v", urls, err)
 	}
 	cfg.Paths = BroadPaths()
 	urls, err = expandTargets(cfg)
-	if err != nil || !containsURL(urls, "http://127.0.0.1:8000/rpc") {
+	if err != nil || len(urls) != 17 || !containsURL(urls, "http://127.0.0.1:8000/rpc") || !containsURL(urls, "http://127.0.0.1:8000/mcp/transport") {
 		t.Fatalf("broad discovery missing /rpc: %v", err)
 	}
 	cfg.Paths = ExtensivePaths()
 	urls, err = expandTargets(cfg)
-	if err != nil || !containsURL(urls, "http://127.0.0.1:8000/api/v1/mcp") || !containsURL(urls, "http://127.0.0.1:8000/server/mcp") {
+	if err != nil || len(urls) != 28 || !containsURL(urls, "http://127.0.0.1:8000/api/v1/mcp") || !containsURL(urls, "http://127.0.0.1:8000/server/mcp") || !containsURL(urls, "http://127.0.0.1:8000/mcp/transport") {
 		t.Fatalf("extensive discovery missing nested MCP paths: %v", err)
 	}
 }
