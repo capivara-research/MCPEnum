@@ -138,7 +138,7 @@ func TestTargetWithoutEndpointFindsSecListsMCPCandidate(t *testing.T) {
 	}))
 	defer s.Close()
 	var out, errout bytes.Buffer
-	if err := run([]string{"scan", "--target", strings.TrimPrefix(s.URL, "http://"), "--http-probe", "off", "--format", "json"}, &out, &errout); err != nil {
+	if err := run([]string{"--target", strings.TrimPrefix(s.URL, "http://"), "--http-probe", "off", "--format", "json"}, &out, &errout); err != nil {
 		t.Fatal(err)
 	}
 	var results []mcprecon.Result

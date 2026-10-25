@@ -30,15 +30,15 @@ func main() {
 }
 
 func run(args []string, out, errout io.Writer) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
+	if len(args) == 0 || args[0] == "help" {
 		usage(out)
 		return nil
 	}
-	if args[0] != "scan" {
-		return errors.New("expected 'scan' subcommand")
+	if args[0] == "scan" {
+		args = args[1:] // keep existing commands working
 	}
 	cfg := mcprecon.Defaults()
-	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs := flag.NewFlagSet("mcpenum", flag.ContinueOnError)
 	fs.SetOutput(errout)
 	var urls, targets, paths values
 	var targetsFile, pathsFile, ports, tokenEnv, tokenFile, format, profile, pathProfile, colorMode string
@@ -72,7 +72,7 @@ func run(args []string, out, errout io.Writer) error {
 	fs.IntVar(&cfg.MaxItems, "max-items", cfg.MaxItems, "maximum items per collection")
 	fs.Int64Var(&cfg.MaxBody, "max-body", cfg.MaxBody, "maximum response bytes")
 	fs.BoolVar(&cfg.Insecure, "insecure", false, "disable TLS certificate verification")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -253,5 +253,5 @@ func parsePorts(s string) ([]int, error) {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum scan --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum scan --target host.example --ports 443,8000 [--path-profile extensive]\n  mcpenum scan --target host.example --paths-file paths.txt\n\nRun mcpenum scan --help for all options.")
+	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum --target 127.0.0.1:8000\n  mcpenum --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum --target host.example --ports 443,8000 [--path-profile extensive]\n\nRun mcpenum --help for all options.")
 }

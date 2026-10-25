@@ -9,13 +9,14 @@
 
 ## Quick start
 
-Requires Go 1.22 or newer.
+Requires Go 1.22 or newer. On Linux or macOS, build and install the executable into a directory on `PATH`:
 
 ```sh
 git clone https://github.com/capivara-research/MCPEnum.git
 cd MCPEnum
 go build -o mcpenum ./cmd/mcpenum
-./mcpenum scan --target 127.0.0.1:8000
+sudo install -m 0755 mcpenum /usr/local/bin/mcpenum
+mcpenum --target 127.0.0.1:8000
 ```
 
 Replace the example with a host and port in your authorized scope. You do not need to know the endpoint path: the default profile tests 17 candidates on the selected port and reports confirmed MCP endpoints. A `host:port` target tests only that port; a host without a port uses `443,3000,8000,8080`. It does not discover arbitrary paths or scan other ports.
@@ -23,10 +24,10 @@ Replace the example with a host and port in your authorized scope. You do not ne
 For an endpoint you already know, use its exact URL. If the URL has no path, MCPEnum uses `/mcp`:
 
 ```sh
-./mcpenum scan --url https://mcp.example.test/api/mcp
+mcpenum --url https://mcp.example.test/api/mcp
 ```
 
-The banner and progress go to `stderr`; the report goes to `stdout`. Use `--verbose` for request-level progress or `--format json` for machine-readable output.
+Installing in `/usr/local/bin` lets you run `mcpenum` from any directory without `./`. If the shell cannot find it, check that `/usr/local/bin` is on `PATH`. The banner and progress go to `stderr`; the report goes to `stdout`. Use `--verbose` for request-level progress or `--format json` for machine-readable output.
 
 ## Endpoint discovery
 
@@ -43,9 +44,9 @@ The candidate set is a curated list, not a protocol standard or an exhaustive se
 Choose a profile or supply known paths:
 
 ```sh
-./mcpenum scan --target 10.0.0.5:8000 --path-profile standard
-./mcpenum scan --target 10.0.0.5 --ports 8000,8080 --path-profile extensive
-./mcpenum scan --target 10.0.0.5:8000 --path /tenant/team/mcp
+mcpenum --target 10.0.0.5:8000 --path-profile standard
+mcpenum --target 10.0.0.5 --ports 8000,8080 --path-profile extensive
+mcpenum --target 10.0.0.5:8000 --path /tenant/team/mcp
 ```
 
 For several custom paths, use `--paths-file`. Each nonblank line is one path; blank lines and lines beginning with `#` are ignored. Custom paths replace the built-in profile, and repeated `--path` values combine with the file. The limit is 128 paths, each up to 256 bytes.
@@ -57,7 +58,7 @@ For several custom paths, use `--paths-file`. Each nonblank line is one path; bl
 ```
 
 ```sh
-./mcpenum scan --target 10.0.0.5:8000 --paths-file paths.txt
+mcpenum --target 10.0.0.5:8000 --paths-file paths.txt
 ```
 
 MCPEnum does not discover arbitrary private prefixes. If a candidate is missed, provide the known path or use the `extensive` profile; a negative result applies only to the paths and ports tested.
@@ -65,10 +66,6 @@ MCPEnum does not discover arbitrary private prefixes. If a candidate is missed, 
 ## Example output
 
 This real AI-RTA SecureCorp lab scan was captured on 25 October 2026, before `/mcp/transport` was added. It used only host and port, tested 16 candidates, and confirmed two endpoints. The current default tests 17 candidates.
-
-```sh
-./mcpenum scan --target 172.16.12.2:8000 --rate 10 --progress always
-```
 
 Selected lines from the report:
 
@@ -94,19 +91,19 @@ The scan listed advertised tools but did not call them. HTTP 200 responses witho
 
 ```sh
 # Known endpoint
-./mcpenum scan --url https://mcp.example.test/mcp
+mcpenum --url https://mcp.example.test/mcp
 
 # Host and port, endpoint unknown
-./mcpenum scan --target mcp.example.test:8000
+mcpenum --target mcp.example.test:8000
 
 # Scoped targets from a file; one URL, host, or host:port per line
-./mcpenum scan --targets-file scope.txt --workers 8 --rate 20
+mcpenum --targets-file scope.txt --workers 8 --rate 20
 
 # Compare anonymous and Bearer-token inventories
-./mcpenum scan --url https://mcp.example.test/mcp --token-env MCPENUM_TOKEN
+mcpenum --url https://mcp.example.test/mcp --token-env MCPENUM_TOKEN
 
 # JSON output and request-level trace
-./mcpenum scan --target mcp.example.test:8000 --format json --verbose
+mcpenum --target mcp.example.test:8000 --format json --verbose
 ```
 
 Set `MCPENUM_TOKEN` before the token example. The scanner checks anonymous access first, then repeats discovery and inventory with the Bearer token. Tokens and session ID values are not printed. `--token-file PATH` is also available.
@@ -146,7 +143,7 @@ Set `MCPENUM_TOKEN` before the token example. The scanner checks anonymous acces
 | `--insecure` | off | Disable TLS certificate verification for controlled tests. |
 | `--user-agent VALUE` | `MCPEnum/0.1.0` | Set the HTTP User-Agent. |
 
-For the current flag list, run `./mcpenum scan --help`.
+For the current flag list, run `mcpenum --help`.
 
 ## Reading results
 

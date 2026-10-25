@@ -1,6 +1,6 @@
 # How MCPEnum performs a scan
 
-This document explains what a default `mcpenum scan` does on the wire and how to interpret its evidence. The scanner sends no MCP tool calls.
+This document explains what a default `mcpenum` run does on the wire and how to interpret its evidence. The scanner sends no MCP tool calls.
 
 ## 1. Choose endpoints
 
