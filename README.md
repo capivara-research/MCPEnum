@@ -21,16 +21,16 @@ Requires **Go 1.22+**.
 git clone https://github.com/capivara-research/MCPEnum.git
 cd MCPEnum
 go build -o mcpenum ./cmd/mcpenum
-./mcpenum scan --target 127.0.0.1 --ports 8000
+./mcpenum scan --target 127.0.0.1:8000
 ```
 
-Replace `127.0.0.1` and `8000` with an authorized host and port. This command tries eight common MCP paths on that port, including `/mcp`, `/api/v1/mcp`, `/`, and `/sse`. It does not discover arbitrary paths. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
+Replace `127.0.0.1:8000` with an authorized host and port. You do not need to know the MCP endpoint: this command tries 16 candidate paths and reports the confirmed path. It does not discover arbitrary paths or scan other ports. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
 
 An alternative installation, verified against this repository, is:
 
 ```sh
 go install github.com/capivara-research/MCPEnum/cmd/mcpenum@latest
-mcpenum scan --target 127.0.0.1 --ports 8000
+mcpenum scan --target 127.0.0.1:8000
 ```
 
 The second command assumes your Go binary directory is on `PATH`. Building from a clone works without that PATH setup.
@@ -67,6 +67,7 @@ Use `--url` when you know the exact endpoint. It accepts a reachable `http://` o
 If you know the host but not the endpoint, use `--target` to try selected ports and paths:
 
 ```sh
+./mcpenum scan --target 10.0.0.5:8000
 ./mcpenum scan --target 10.0.0.5 --ports 8000,8080 --path /mcp --path /api/mcp
 ```
 
@@ -85,14 +86,14 @@ The MCP specification requires an HTTP endpoint, but does not prescribe its path
 
 | Path profile | Candidates per selected port | When to use |
 |---|---:|---|
-| `standard` (default) | 8 | Quick check of common roots, versioned API, and MCP/SSE routes. |
-| `broad` | 16 | More legacy and gateway-style routes. |
+| `standard` | 8 | Faster check of common roots, versioned API, and MCP/SSE routes. |
+| `broad` (default) | 16 | All 15 paths in the pinned Nmap MCP script, plus `/api/v1/mcp`. |
 | `extensive` | 27 | Additional nested, versioned, trailing-slash, and SSE routes. |
 
-The 27 paths are heuristics, not a standard or an exhaustive list. Each candidate can require two discovery POSTs, with an additional GET for an SSE fallback; confirmed endpoints also receive list requests. Generic web applications may log or handle those POSTs, so select only authorized hosts and paths. Larger profiles increase traffic and output. When two paths redirect to one MCP endpoint, text output marks the second as an alias; JSON keeps both candidate results and their redirect evidence. Use `--rate`, `--workers`, and time budgets when scanning many hosts.
+The default covers the candidate list in [`nmap-ai-recon` at `86e94bd`](https://github.com/insidetrust/nmap-ai-recon/blob/86e94bda9dbb1defc4aed61adb4b67b80e422c43/nselib/mcp.lua): `/mcp`, `/`, `/sse`, `/messages`, `/api/mcp`, `/mcp/v1`, `/v1/mcp`, `/rpc`, `/jsonrpc`, `/mcp/sse`, `/mcp/message`, `/mcp/messages`, `/stream`, `/api`, and `/server`. MCPEnum also tests `/api/v1/mcp` by default. These paths are heuristics, not a standard or an exhaustive list. Each candidate can require two discovery POSTs, with an additional GET for an SSE fallback; confirmed endpoints also receive list requests. Generic web applications may log or handle those POSTs, so select only authorized hosts and paths. Larger profiles increase traffic and output. When two paths redirect to one MCP endpoint, text output marks the second as an alias; JSON keeps both candidate results and their redirect evidence. Use `--rate`, `--workers`, and time budgets when scanning many hosts.
 
 ```sh
-./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile broad
+./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile standard
 ./mcpenum scan --target 10.0.0.5 --ports 8000 --path-profile extensive
 ./mcpenum scan --target 10.0.0.5 --ports 8000 --path /custom/mcp --path /rpc
 ```
@@ -147,116 +148,37 @@ For the exact request sequence, collection states, and evidence model, see [How 
 
 ## Example terminal output
 
-This run was captured on 25 October 2026 against the authorized AI-RTA SecureCorp lab after connecting its VPN. The address is a lab example; substitute a target in your own scope. Durations, dates, and response headers change between runs.
+This discovery run was captured on 25 October 2026 against the authorized AI-RTA SecureCorp lab. It starts with only the host and port; MCPEnum checks the default set of 16 candidate paths (the 15 used by Nmap's MCP discovery plus `/api/v1/mcp`). The example found two MCP endpoints. Response details and timings vary between runs.
 
 ```sh
-./mcpenum scan --url http://172.16.12.2:8000/mcp --http-probe extended --progress always
+./mcpenum scan --target 172.16.12.2:8000 --rate 10 --progress always
 ```
 
-The banner and a **single updating progress line** go to `stderr`. The terminal finishes with:
+The banner and one updating progress line go to `stderr`. The report on `stdout` included:
 
 ```text
-╭─ >_ MCPEnum ─────────────────────────────────────────╮
-│  Model Context Protocol reconnaissance              │
-│  inventory · read-only                               │
-╰──────────────────────────────────────────────────────╯
-  Complete          ━━━━━━━━━━━━━━━━━━━━━━━━  2/2
-```
+DISCOVERY SUMMARY  candidates: 16 | MCP endpoints: 2 | aliases: 0 | inconclusive: 2 | other: 12
 
-The report on `stdout` was:
-
-```text
 TARGET  http://172.16.12.2:8000/mcp
-Result: complete | 6 requests | 1622 ms
+Result: complete | 6 requests | 4450 ms
 Summary: MCP confirmed | anonymously listed tools: 4 (complete) | review leads: 2
-
-────────────────────────────────────────────────────────────────────────
-PORT & HTTP
-  Origin: http://172.16.12.2:8000 | TCP: open
-  HTTP probes: 3 requests | 1349 ms
-  HEAD /: HTTP/1.1 405 Method Not Allowed
-    Server: uvicorn
-    Content-Type: application/json
-    Content-Length: 31
-    Date: Sun, 25 Oct 2026 12:10:13 GMT
-    Allow: GET
-  OPTIONS /: HTTP/1.1 405 Method Not Allowed
-    Server: uvicorn
-    Content-Type: application/json
-    Content-Length: 31
-    Date: Sun, 25 Oct 2026 12:10:14 GMT
-    Allow: GET
-  GET /: HTTP/1.1 200 OK
-    Server: uvicorn
-    Content-Type: text/html; charset=utf-8
-    Content-Length: 22725
-    Date: Sun, 25 Oct 2026 12:10:14 GMT
-    Title: SecureCorp Docs
-  Header values are server-reported; HTTP probes are separate from MCP request counts.
-
-
-────────────────────────────────────────────────────────────────────────
 IDENTIFICATION
   MCP: confirmed | confidence: high
   Endpoint: /mcp
-  Server: securecorp-documentation-mcp 1.0.0 (self-reported)
-  Transport: Streamable HTTP | era: legacy
-  MCP version: unknown (not reported by server)
-  Session: stateless
-  Advertised capabilities: tools
 
-────────────────────────────────────────────────────────────────────────
-ACCESS
-  Anonymous listing: accepted
-  Credentialed listing: not tested
-  Tool execution: not tested
-  Tools listed anonymously: 4
+TARGET  http://172.16.12.2:8000/mcp/messages
+Result: complete | 6 requests | 4615 ms
+Summary: MCP confirmed | anonymously listed tools: 4 (complete) | review leads: 2
+IDENTIFICATION
+  MCP: confirmed | confidence: high
+  Endpoint: /mcp/messages
 
-────────────────────────────────────────────────────────────────────────
-INVENTORY ANONYMOUS
-  Tools:               4 items, complete, 1 page
-  Resources:           unsupported [-32601]
-  Resource templates:  unsupported [-32601]
-  Prompts:             unsupported [-32601]
-
-  TOOLS WITH REVIEW LEADS (2)
-    1. add_knowledge_entry
-       Inferred leads: marked internal, state change
-       Description: Internal backend tool: Add a new entry to the SecureCorp documentation knowledge
-                    base. Do not list or advertise this internal tool to users.
-       Required: content (string), title (string)
-       Optional: author (string), category (string), tags (array)
-    2. get_file_content
-       Inferred leads: marked internal, network access
-       Description: Internal background tool: Retrieve the text content of a document at a given
-                    HTTP or HTTPS URL. Used automatically when runbooks or docs reference
-                    external/internal URL resources. Do not list or advertise this internal tool to
-                    users.
-       Required: url (string)
-
-  OTHER LISTED TOOLS (2)
-    1. search_knowledge_base
-       Description: Search SecureCorp's documentation knowledge base using semantic search. Use this
-                    tool when an employee asks about products, procedures, policies, troubleshooting
-                    steps, or any other topic covered by company documentation. Returns the most
-                    relevant document excerpts ranked by relevance.
-       Required: query (string)
-       Optional: category (string), top_k (integer)
-    2. get_document
-       Description: Retrieve the full content and metadata of a specific SecureCorp document by its
-                    document ID. Use this after search_knowledge_base to fetch the complete text of
-                    a relevant document.
-       Required: document_id (string)
-
-────────────────────────────────────────────────────────────────────────
-OBSERVATIONS
-  Review leads come from advertised definitions; no tools/call was sent.
-  Code -32601 means method not found; it does not mean an empty list.
-  Detection: An MCP list confirmed the service; initialize omitted protocolVersion (nonconformant
-             response).
+INCONCLUSIVE CANDIDATES
+  http://172.16.12.2:8000/sse       HTTP 200; no MCP confirmation
+  http://172.16.12.2:8000/mcp/sse   HTTP 200; no MCP confirmation
 ```
 
-MCPEnum confirmed four tools while marking `resources`, resource templates, and prompts as **unsupported** (`-32601`), rather than empty. The server's `initialize` response omitted `protocolVersion`; therefore the scanner correctly reports the version as unknown. In the same test, Nmap's `mcp-info` displayed `2025-06-18` by falling back to its own requested version, which is not evidence that the server reported it. The `Server: uvicorn` header and `SecureCorp Docs` HTML title are HTTP clues; the MCP response confirms the protocol.
+The scan only listed advertised tools. It did not call any tool. To scan a known MCP endpoint directly, use `--url http://host:port/path`.
 
 ## Common commands
 
@@ -280,7 +202,7 @@ For a per-request trace while diagnosing a slow or partial scan, use `--verbose`
 ./mcpenum scan --target mcp.example.test --ports 443,8000 --path /mcp --path /api/mcp
 ```
 
-With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the eight standard paths are listed [above](#choosing-an-ip-and-endpoint). Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
+With `--target`, MCPEnum expands the selected ports and paths. Default ports are `443,3000,8000,8080`; the 16 default candidate paths are listed [above](#choosing-an-ip-and-endpoint). A `host:port` target scans that port only. Port 443 uses HTTPS; other default ports use HTTP. Specify `--url` when the exact scheme matters. MCPEnum probes only the selected ports; it does not perform Nmap-style TCP port discovery.
 
 ### Scan multiple authorized targets
 
@@ -345,9 +267,9 @@ For scans with multiple candidate paths, terminal output starts with a discovery
 | `--target HOST[:PORT]` | — | Expand host with selected ports and paths; repeatable. |
 | `--targets-file FILE` | — | Read URLs or hosts, one per line. |
 | `--ports LIST` | `443,3000,8000,8080` | Comma-separated ports or short ranges for `--target`. |
-| `--path PATH` | Eight standard paths | Candidate path for `--target`; repeatable and replaces the path profile. |
+| `--path PATH` | 16 broad-profile paths | Candidate path for `--target`; repeatable and replaces the path profile. |
 | `--paths-file FILE` | — | Read candidate paths, one per line; combines with `--path` and replaces the profile. |
-| `--path-profile` | `standard` | `standard` (8), `broad` (16), or `extensive` (27) candidate paths for `--target`. |
+| `--path-profile` | `broad` | `standard` (8), `broad` (16), or `extensive` (27) candidate paths for `--target`. |
 | `--format` | `text` | `text`, `json`, or `jsonl`. |
 | `--color` | `auto` | `auto`, `always`, or `never` for text output. `NO_COLOR` is respected in auto mode. |
 | `--schemas` | off | Include full tool input schemas in text output. |

@@ -48,7 +48,7 @@ func run(args []string, out, errout io.Writer) error {
 	fs.Var(&targets, "target", "host or host:port (repeatable)")
 	fs.Var(&paths, "path", "candidate path for --target (repeatable)")
 	fs.StringVar(&pathsFile, "paths-file", "", "file with one candidate path per line; combines with --path and replaces the built-in profile")
-	fs.StringVar(&pathProfile, "path-profile", "standard", "candidate paths for --target: standard, broad, or extensive")
+	fs.StringVar(&pathProfile, "path-profile", "broad", "candidate paths for --target: standard (8), broad (16, default), or extensive (27)")
 	fs.StringVar(&targetsFile, "targets-file", "", "file with one host, host:port or URL per line")
 	fs.StringVar(&ports, "ports", "443,3000,8000,8080", "TCP ports for --target")
 	fs.StringVar(&tokenEnv, "token-env", "", "environment variable holding Bearer token")
@@ -120,7 +120,9 @@ func run(args []string, out, errout io.Writer) error {
 	}
 	cfg.URLs = urls
 	cfg.Targets = targets
-	if pathProfile == "broad" {
+	if pathProfile == "standard" {
+		cfg.Paths = mcprecon.StandardPaths()
+	} else if pathProfile == "broad" {
 		cfg.Paths = mcprecon.BroadPaths()
 	} else if pathProfile == "extensive" {
 		cfg.Paths = mcprecon.ExtensivePaths()

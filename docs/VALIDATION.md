@@ -68,6 +68,8 @@ The missed FastMCP route was a useful coverage gap. MCPEnum now includes `/api/v
 
 With `/api/v1/mcp` passed explicitly, Nmap confirmed the service and listed the same one tool, one resource, and one prompt. Its default path list remains unchanged. A missed default path must be reported as *not found within the chosen candidates*, never as proof that the host has no MCP endpoint. The broader MCPEnum profiles spend more requests to cover other nested and legacy paths; no profile can infer arbitrary private prefixes.
 
+The current CLI now selects the 16-path `broad` profile by default. This includes every candidate in the pinned Nmap script's 15-path list and `/api/v1/mcp`. The table above preserves the original measurements for each explicitly selected profile; changing the default did not change those candidate sets.
+
 The first post-change text report classified the non-existent `/sse` candidate as `inconclusive` despite three HTTP 404 responses. That state was corrected: a modern discovery 404, legacy initialize 404, and SSE GET 404/405 now produce a completed negative candidate. A regression test and a repeat of the FastMCP default scan confirmed `MCP endpoints: 1 | inconclusive: 0`.
 
 ```sh

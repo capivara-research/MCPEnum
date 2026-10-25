@@ -41,10 +41,22 @@ func TestDefaultTargetPathsIncludeRootAndBroadAddsCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"http://127.0.0.1:8000/mcp", "http://127.0.0.1:8000/", "http://127.0.0.1:8000/messages", "http://127.0.0.1:8000/api/v1/mcp"} {
+	// The default includes all 15 candidate paths from nmap-ai-recon
+	// nselib/mcp.lua at 86e94bd, plus /api/v1/mcp observed in FastMCP.
+	nmapPaths := []string{"/mcp", "/", "/sse", "/messages", "/api/mcp", "/mcp/v1", "/v1/mcp", "/rpc", "/jsonrpc", "/mcp/sse", "/mcp/message", "/mcp/messages", "/stream", "/api", "/server"}
+	if len(cfg.Paths) != 16 || len(urls) != 16 {
+		t.Fatalf("default discovery should test 16 paths, got %d config paths and %d URLs", len(cfg.Paths), len(urls))
+	}
+	for _, path := range append(nmapPaths, "/api/v1/mcp") {
+		expected := "http://127.0.0.1:8000" + path
 		if !containsURL(urls, expected) {
-			t.Errorf("standard discovery missing %s", expected)
+			t.Errorf("default discovery missing %s", expected)
 		}
+	}
+	cfg.Paths = StandardPaths()
+	urls, err = expandTargets(cfg)
+	if err != nil || len(urls) != 8 || containsURL(urls, "http://127.0.0.1:8000/rpc") {
+		t.Fatalf("standard profile should remain the eight-path quick scan: %v, %v", urls, err)
 	}
 	cfg.Paths = BroadPaths()
 	urls, err = expandTargets(cfg)
@@ -372,7 +384,7 @@ func TestTokenDoesNotHidePublicAccess(t *testing.T) {
 func TestLegacyHTTPSSE(t *testing.T) {
 	messages := make(chan string, 8)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sse") && r.Method == http.MethodGet {
+		if legacySSECandidate(r.URL.Path) && r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "text/event-stream")
 			postPath := "/messages"
 			if r.URL.Path == "/sse" {
@@ -390,7 +402,7 @@ func TestLegacyHTTPSSE(t *testing.T) {
 				}
 			}
 		}
-		if strings.HasSuffix(r.URL.Path, "/sse") {
+		if legacySSECandidate(r.URL.Path) {
 			w.WriteHeader(405)
 			return
 		}
@@ -425,7 +437,7 @@ func TestLegacyHTTPSSE(t *testing.T) {
 	}))
 	defer s.Close()
 	cfg := testDefaults()
-	for _, path := range []string{"/sse", "/mcp/sse", "/api/sse"} {
+	for _, path := range []string{"/sse", "/mcp/sse", "/api/sse", "/mcp"} {
 		cfg.URLs = []string{s.URL + path}
 		res, e := Scan(context.Background(), cfg)
 		if e != nil {

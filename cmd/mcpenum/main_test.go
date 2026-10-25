@@ -104,6 +104,61 @@ func TestPathsFileFindsCustomMountedEndpoint(t *testing.T) {
 	}
 }
 
+func TestTargetWithoutEndpointFindsNmapCandidateRPC(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rpc" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		result := map[string]any{}
+		switch req.Method {
+		case "server/discover":
+			result = map[string]any{"supportedVersions": []string{"2026-07-28"}, "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup_note"}}}
+		case "resources/list":
+			result = map[string]any{"resources": []any{}}
+		case "resources/templates/list":
+			result = map[string]any{"resourceTemplates": []any{}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []any{}}
+		default:
+			t.Errorf("unexpected method: %s", req.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	}))
+	defer s.Close()
+	var out, errout bytes.Buffer
+	if err := run([]string{"scan", "--target", strings.TrimPrefix(s.URL, "http://"), "--http-probe", "off", "--format", "json"}, &out, &errout); err != nil {
+		t.Fatal(err)
+	}
+	var results []mcprecon.Result
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 16 {
+		t.Fatalf("expected 16 default paths, got %d", len(results))
+	}
+	for _, result := range results {
+		if len(result.Services) == 1 && result.Services[0].Detection.Status == "confirmed" {
+			if result.Services[0].Endpoint != "/rpc" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
+				t.Fatalf("wrong discovered endpoint or inventory: %+v", result.Services[0])
+			}
+			return
+		}
+	}
+	t.Fatal("/rpc was not discovered without an explicit endpoint")
+}
+
 func TestTerminalColorModes(t *testing.T) {
 	var out bytes.Buffer
 	if terminalColorEnabled("auto", &out) || terminalColorEnabled("never", os.Stdout) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -47,8 +48,13 @@ func TestHTTPProfileIsCollectedOncePerOrigin(t *testing.T) {
 		if p.Probes[0].Location != "/login" || p.Probes[0].Server != "fixture-http/1" || p.Probes[1].Allow != "GET, HEAD, OPTIONS" {
 			t.Fatalf("missing or unsafe HTTP evidence: %+v", p)
 		}
-		if result.Metrics.Requests != 2 {
-			t.Fatalf("HTTP probes mixed into MCP request count: %+v", result.Metrics)
+		wantMCPRequests := 2
+		u, _ := url.Parse(result.Target.Input)
+		if u.Path == "/mcp" {
+			wantMCPRequests = 3 // includes the legacy SSE GET fallback
+		}
+		if result.Metrics.Requests != wantMCPRequests {
+			t.Fatalf("HTTP probes mixed into MCP request count: target=%s metrics=%+v", result.Target.Input, result.Metrics)
 		}
 	}
 }

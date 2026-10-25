@@ -28,11 +28,12 @@ var extensivePaths = []string{
 	"/message", "/stream", "/api/stream", "/api", "/server", "/api/v1", "/mcp-server",
 }
 
+func StandardPaths() []string  { return append([]string(nil), standardPaths...) }
 func BroadPaths() []string     { return append([]string(nil), broadPaths...) }
 func ExtensivePaths() []string { return append([]string(nil), extensivePaths...) }
 
 func Defaults() Config {
-	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: append([]string(nil), standardPaths...), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0", HTTPProbe: "basic"}
+	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: BroadPaths(), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0", HTTPProbe: "basic"}
 }
 
 func Scan(ctx context.Context, cfg Config) ([]Result, error) {
@@ -179,6 +180,10 @@ func expandTargets(cfg Config) ([]string, error) {
 		return nil, errors.New("target expansion exceeds limit")
 	}
 	return out, nil
+}
+
+func legacySSECandidate(path string) bool {
+	return path == "/mcp" || strings.HasSuffix(path, "/sse")
 }
 
 func safePath(p string) bool {
@@ -387,7 +392,7 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 			} else {
 				svc.Detection = Detection{Status: "inconclusive", Confidence: "low", EvidenceIDs: []string{initID, probeID}, Reason: "nonconformant initialize; tools/list did not confirm MCP (" + listed.Status + ")"}
 			}
-		} else if strings.HasSuffix(c.endpoint.Path, "/sse") && ctx.Err() == nil {
+		} else if legacySSECandidate(c.endpoint.Path) && ctx.Err() == nil {
 			if e := c.startLegacySSE(ctx); e == nil {
 				init := c.request(ctx, "initialize", map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "MCPEnum", "version": "0.1.0"}}, "discovery")
 				if init.Err == nil && init.RPC.Error == nil && acceptInitialize(init.RPC.Result, svc) {
@@ -401,7 +406,7 @@ func scanContext(ctx context.Context, raw string, cfg Config, token string, r *R
 			}
 		}
 		if svc.Detection.Status != "confirmed" && (disc.HTTPStatus == 404 || disc.HTTPStatus == 405) && (init.HTTPStatus == 404 || init.HTTPStatus == 405) {
-			if !strings.HasSuffix(c.endpoint.Path, "/sse") {
+			if !legacySSECandidate(c.endpoint.Path) {
 				return nil, "unknown"
 			}
 			// For an SSE candidate, the GET is the last transport attempt.

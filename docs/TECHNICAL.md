@@ -4,7 +4,7 @@ This document explains what a default `mcpenum scan` does on the wire and how to
 
 ## 1. Choose endpoints
 
-`--url` uses the URL exactly as supplied, adding `/mcp` only when there is no path. `--target` expands a host across selected ports and paths. The path profiles contain 8 (`standard`), 16 (`broad`), or 27 (`extensive`) candidates. Supplying `--path` or `--paths-file` replaces the profile with explicit paths; the two custom sources combine. Custom paths are capped at 128 entries and 256 bytes each. Explicit URLs and expanded targets are deduplicated. CIDR expansion is disabled until `--allow-cidr` is supplied, and `--max-hosts` caps it.
+`--url` uses the URL exactly as supplied, adding `/mcp` only when there is no path. `--target` expands a host across selected ports and paths, so a user can provide only `host:port` when the endpoint is unknown. The path profiles contain 8 (`standard`), 16 (`broad`, the default), or 27 (`extensive`) candidates. The default includes all 15 paths from `nmap-ai-recon` at `86e94bd`, plus `/api/v1/mcp`. Supplying `--path` or `--paths-file` replaces the profile with explicit paths; the two custom sources combine. Custom paths are capped at 128 entries and 256 bytes each. Explicit URLs and expanded targets are deduplicated. CIDR expansion is disabled until `--allow-cidr` is supplied, and `--max-hosts` caps it.
 
 Each endpoint receives its own time budget. Multiple endpoints can run concurrently, bounded by `--workers`. `--rate` caps aggregate HTTP request rate across the scan.
 
