@@ -18,7 +18,7 @@ import (
 var htmlTitle = regexp.MustCompile(`(?is)<title\b[^>]*>(.*?)</title\s*>`)
 
 // Profile each origin once even when many candidate paths share its port.
-func attachPortProfiles(ctx context.Context, results []Result, cfg Config) {
+func attachPortProfiles(ctx context.Context, results []Result, cfg Config, known map[string]*PortInfo) {
 	type group struct {
 		origin  string
 		indices []int
@@ -54,7 +54,9 @@ func attachPortProfiles(ctx context.Context, results []Result, cfg Config) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if allGroupConnectionRefused(results, groups[j].indices) {
+				if profile := known[groups[j].origin]; profile != nil {
+					profiles[j] = profile
+				} else if allGroupConnectionRefused(results, groups[j].indices) {
 					profiles[j] = &PortInfo{Origin: groups[j].origin, TCPState: "closed", Probes: []HTTPProbeInfo{}}
 				} else {
 					profiles[j] = probePort(ctx, groups[j].origin, cfg)
@@ -124,6 +126,7 @@ func probePort(ctx context.Context, origin string, cfg Config) *PortInfo {
 		probeTimeout = 1500 * time.Millisecond
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
 	transport.MaxResponseHeaderBytes = 16 << 10
 	transport.ResponseHeaderTimeout = probeTimeout
 	transport.DisableCompression = true

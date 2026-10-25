@@ -92,13 +92,17 @@ func TestPathsFileFindsCustomMountedEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errout bytes.Buffer
-	if err := run([]string{"scan", "--target", strings.TrimPrefix(s.URL, "http://"), "--paths-file", file, "--format", "json"}, &out, &errout); err != nil {
+	if err := run([]string{"--target", strings.TrimPrefix(s.URL, "http://"), "--paths-file", file, "--format", "json"}, &out, &errout); err != nil {
 		t.Fatal(err)
 	}
-	var result mcprecon.Result
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+	var results []mcprecon.Result
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
 		t.Fatal(err)
 	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result, got %d", len(results))
+	}
+	result := results[0]
 	if len(result.Services) != 1 || result.Services[0].Detection.Status != "confirmed" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
 		t.Fatalf("custom path not enumerated: %+v", result)
 	}
@@ -159,6 +163,94 @@ func TestTargetWithoutEndpointFindsSecListsMCPCandidate(t *testing.T) {
 	t.Fatal("/mcp/transport was not discovered without an explicit endpoint")
 }
 
+func TestDirectCLIRejectsRemovedSubcommand(t *testing.T) {
+	var out, errout bytes.Buffer
+	err := run([]string{"scan", "--target", "127.0.0.1:1"}, &out, &errout)
+	if err == nil || !strings.Contains(err.Error(), `unexpected positional argument "scan"`) {
+		t.Fatalf("removed subcommand should be rejected before scanning: %v", err)
+	}
+	if err := run([]string{"--version"}, &out, &errout); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "MCPEnum ") {
+		t.Fatalf("version output missing: %q", out.String())
+	}
+}
+
+func TestTargetHTTPSNonstandardPortDiscoversMCP(t *testing.T) {
+	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		result := map[string]any{}
+		switch request.Method {
+		case "server/discover":
+			result = map[string]any{"supportedVersions": []string{"2026-07-28"}, "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "status"}}}
+		case "resources/list":
+			result = map[string]any{"resources": []any{}}
+		case "resources/templates/list":
+			result = map[string]any{"resourceTemplates": []any{}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []any{}}
+		default:
+			t.Errorf("unexpected method %q", request.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer s.Close()
+
+	var out, errout bytes.Buffer
+	err := run([]string{"--target", strings.TrimPrefix(s.URL, "https://"), "--path", "/mcp", "--http-probe", "off", "--insecure", "--format", "json"}, &out, &errout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var results []mcprecon.Result
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result, got %d", len(results))
+	}
+	result := results[0]
+	if result.Target.Scheme != "https" || len(result.Services) != 1 || result.Services[0].Detection.Status != "confirmed" || result.Services[0].MCP.Inventories["anonymous"].Tools.Count != 1 {
+		t.Fatalf("HTTPS target was not inventoried: %+v", result)
+	}
+}
+
+func FuzzParsePorts(f *testing.F) {
+	for _, seed := range []string{"80", "443,8000-8002", "0", "65536", "1-2000", "", "80,,443", "abc"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		ports, err := parsePorts(input)
+		if err != nil {
+			return
+		}
+		if len(ports) == 0 || len(ports) > 128 {
+			t.Fatalf("invalid count: %d", len(ports))
+		}
+		seen := map[int]bool{}
+		for _, port := range ports {
+			if port < 1 || port > 65535 || seen[port] {
+				t.Fatalf("invalid port: %d", port)
+			}
+			seen[port] = true
+		}
+	})
+}
+
 func TestTerminalColorModes(t *testing.T) {
 	var out bytes.Buffer
 	if terminalColorEnabled("auto", &out) || terminalColorEnabled("never", os.Stdout) {
@@ -184,13 +276,16 @@ func TestProgressAndVerboseKeepJSONMachineReadable(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errout bytes.Buffer
-			args := append([]string{"scan", "--url", s.URL + "/missing", "--http-probe", "off", "--format", "json"}, tc.args...)
+			args := append([]string{"--url", s.URL + "/missing", "--http-probe", "off", "--format", "json"}, tc.args...)
 			if err := run(args, &out, &errout); err != nil {
 				t.Fatal(err)
 			}
-			var result mcprecon.Result
-			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+			var results []mcprecon.Result
+			if err := json.Unmarshal(out.Bytes(), &results); err != nil {
 				t.Fatalf("stdout is not valid JSON: %v; output=%q", err, out.String())
+			}
+			if len(results) != 1 {
+				t.Fatalf("expected one result, got %d", len(results))
 			}
 			if !strings.Contains(errout.String(), "╭─ >_ MCPEnum") || !strings.Contains(errout.String(), tc.want) {
 				t.Fatalf("missing banner or status on stderr: %q", errout.String())
@@ -201,7 +296,7 @@ func TestProgressAndVerboseKeepJSONMachineReadable(t *testing.T) {
 		})
 	}
 	var out, errout bytes.Buffer
-	if err := run([]string{"scan", "--url", s.URL + "/missing", "--http-probe", "off", "--format", "json", "--quiet", "--progress", "always"}, &out, &errout); err != nil {
+	if err := run([]string{"--url", s.URL + "/missing", "--http-probe", "off", "--format", "json", "--quiet", "--progress", "always"}, &out, &errout); err != nil {
 		t.Fatal(err)
 	}
 	if errout.Len() != 0 {

@@ -77,6 +77,7 @@ func newClient(rawURL string, cfg Config, token string, result *Result) (*client
 		return nil, fmt.Errorf("invalid target URL")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
 	transport.MaxConnsPerHost = 2
 	transport.MaxIdleConnsPerHost = 2
 	transport.IdleConnTimeout = 10 * time.Second

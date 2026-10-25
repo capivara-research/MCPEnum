@@ -161,7 +161,7 @@ func printPortInfo(w io.Writer, p *mcprecon.PortInfo, color bool) {
 		fmt.Fprintf(w, "  TLS: %s\n", safeLine(p.TLSVersion))
 	}
 	if len(p.Probes) == 0 {
-		fmt.Fprintln(w, "  HTTP probes: skipped after connection refusal")
+		fmt.Fprintln(w, "  HTTP probes: skipped because no TCP connection was established")
 		fmt.Fprintln(w)
 		return
 	}

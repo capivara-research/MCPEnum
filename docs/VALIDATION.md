@@ -2,7 +2,9 @@
 
 This report records local scans performed on 2026-10-25 against servers built from distinct public MCP projects. It compares MCPEnum with the `mcp-info` and `mcp-enum` scripts from [`nmap-ai-recon` at `86e94bd`](https://github.com/insidetrust/nmap-ai-recon/tree/86e94bda9dbb1defc4aed61adb4b67b80e422c43). All scans targeted `127.0.0.1`; no third-party deployment was scanned.
 
-The commands below preserve the exact historical invocations. Current usage accepts flags directly, for example `mcpenum --target 127.0.0.1:14004`; the earlier `scan` form also works.
+The commands below preserve the exact historical invocations. Current usage accepts flags directly, for example `mcpenum --target 127.0.0.1:14004`; the earlier `scan` subcommand has been removed.
+
+The timing and request counts in this document predate TCP/HTTP preflight and conservative default rate limits. Current `--target` scans first check TCP and confirm HTTP(S), including when `--http-probe off` disables supplemental profiling. The pinned FastMCP 3.4.11 and 4.1.3 custom-path fixtures now run in CI; the other SDK measurements remain manual historical checks.
 
 The comparison has two parts: inventory correctness and endpoint discovery. Counts are reported as **tools / resources / resource templates / prompts** for MCPEnum. The Nmap scripts display resource templates together with resources, so their resource count is a combined value. Both clients can negotiate different MCP revisions with the same server; compare inventories only in that context.
 

@@ -22,7 +22,7 @@ This review compares MCPEnum with Nmap service detection and the OWASP Web Secur
 
 ## Next opportunities
 
-1. **HTTP/TLS detection on nonstandard ports.** `--target` assumes HTTP except on port 443. A bounded TLS fallback per origin could reduce wrong-scheme negatives. `--url` already allows an exact scheme.
+1. **HTTP/TLS identification on nonstandard ports.** Implemented: target scans check TCP, detect TLS, and confirm HTTP before MCP paths. `--scan-ports` can find ports outside the default list. Remaining work: tune identification for servers that reject both `HEAD /` and `OPTIONS /` before any valid MCP request, and measure false negatives on more SDKs.
 2. **Service signatures with provenance.** If product/version signatures are added, report the matching response, rule, and confidence. A lone `Server` header must remain self-reported evidence.
 3. **Non-HTTP services.** An open TCP port without HTTP should remain an unknown service. Generic banner detection would need a separate bounded module rather than an inference from a failed HTTP request.
 4. **Continuous interoperability tests.** Keep fixtures for modern and legacy MCP, authentication, pagination, SSE, custom paths, redirects, and non-MCP HTTP services. Compare items and collection states as well as counts.

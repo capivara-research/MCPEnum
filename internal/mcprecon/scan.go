@@ -2,6 +2,7 @@ package mcprecon
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -34,12 +35,31 @@ func BroadPaths() []string     { return append([]string(nil), broadPaths...) }
 func ExtensivePaths() []string { return append([]string(nil), extensivePaths...) }
 
 func Defaults() Config {
-	return Config{Ports: []int{443, 3000, 8000, 8080}, Paths: BroadPaths(), Timeout: 5000, Budget: 30000, Workers: 16, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0", HTTPProbe: "basic"}
+	return Config{Ports: []int{80, 443, 3000, 8000, 8080, 8443}, Paths: BroadPaths(), Scheme: "auto", Timeout: 5000, Budget: 30000, Workers: 8, Rate: 20, MaxPages: 32, MaxItems: 5000, MaxBody: 2 << 20, MaxHosts: 16, UserAgent: "MCPEnum/0.1.0", HTTPProbe: "basic", PortDiscovery: true, PortScanWorkers: 64, PortScanTimeout: 1000}
 }
 
 func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	if len(cfg.Paths) > 128 {
 		return nil, errors.New("too many candidate paths (maximum 128)")
+	}
+	if len(cfg.Ports) > 128 {
+		return nil, errors.New("too many selected ports (maximum 128)")
+	}
+	if cfg.Workers < 1 || cfg.Workers > 256 || cfg.Timeout < 100 || cfg.Budget < cfg.Timeout || cfg.MaxPages < 1 || cfg.MaxItems < 1 || cfg.MaxBody < 1024 || cfg.Rate < 0 || cfg.Rate > 10000 || cfg.PortScanWorkers < 1 || cfg.PortScanWorkers > 512 || cfg.PortScanTimeout < 50 || cfg.PortScanTimeout > 5000 || len(cfg.UserAgent) > 128 || strings.ContainsAny(cfg.UserAgent, "\r\n") || (cfg.HTTPProbe != "off" && cfg.HTTPProbe != "basic" && cfg.HTTPProbe != "extended") {
+		return nil, errors.New("invalid scan limits")
+	}
+	if cfg.PortScanStart != 0 {
+		if cfg.PortScanStart < 1 || cfg.PortScanEnd > 65535 || cfg.PortScanEnd < cfg.PortScanStart {
+			return nil, errors.New("invalid port scan range")
+		}
+		var err error
+		cfg.Targets, err = scanPortRange(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		if len(cfg.Targets) == 0 && len(cfg.URLs) == 0 {
+			return nil, errors.New("no open TCP ports found in the selected range")
+		}
 	}
 	urls, err := expandTargets(cfg)
 	if err != nil {
@@ -48,13 +68,15 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	if len(urls) == 0 {
 		return nil, errors.New("no targets supplied")
 	}
-	if cfg.Workers < 1 || cfg.Workers > 256 || cfg.Timeout < 100 || cfg.Budget < cfg.Timeout || cfg.MaxPages < 1 || cfg.MaxItems < 1 || cfg.MaxBody < 1024 || cfg.Rate < 0 || cfg.Rate > 10000 || len(cfg.UserAgent) > 128 || strings.ContainsAny(cfg.UserAgent, "\r\n") || (cfg.HTTPProbe != "off" && cfg.HTTPProbe != "basic" && cfg.HTTPProbe != "extended") {
-		return nil, errors.New("invalid scan limits")
-	}
 	if cfg.Rate > 0 {
 		ticker := time.NewTicker(time.Second / time.Duration(cfg.Rate))
 		defer ticker.Stop()
 		cfg.gate = ticker.C
+	}
+	var skipped []Result
+	var preflightProfiles map[string]*PortInfo
+	if cfg.PortDiscovery && len(cfg.Targets) > 0 {
+		urls, skipped, preflightProfiles = discoverPorts(ctx, cfg, urls)
 	}
 	results := make([]Result, len(urls))
 	jobs := make(chan int)
@@ -100,12 +122,255 @@ func Scan(ctx context.Context, cfg Config) ([]Result, error) {
 	close(jobs)
 	wg.Wait()
 	if cfg.HTTPProbe != "off" {
-		attachPortProfiles(ctx, results, cfg)
+		attachPortProfiles(ctx, results, cfg, preflightProfiles)
+	} else {
+		for i := range results {
+			u, err := url.Parse(results[i].Target.Input)
+			if err == nil {
+				results[i].PortInfo = preflightProfiles[u.Scheme+"://"+u.Host]
+			}
+		}
 	}
-	return results, nil
+	return append(results, skipped...), nil
+}
+
+// discoverPorts checks each selected target port once. Exact --url inputs bypass
+// this step, because the caller already supplied an endpoint to test.
+func discoverPorts(ctx context.Context, cfg Config, urls []string) ([]string, []Result, map[string]*PortInfo) {
+	explicit := map[string]bool{}
+	for _, raw := range cfg.URLs {
+		u, err := url.Parse(raw)
+		if err == nil {
+			if u.Path == "" {
+				u.Path = "/mcp"
+			}
+			explicit[u.String()] = true
+		}
+	}
+	origins := map[string]bool{}
+	var ordered []string
+	for _, raw := range urls {
+		if explicit[raw] {
+			continue
+		}
+		u, _ := url.Parse(raw)
+		origin := u.Scheme + "://" + u.Host
+		if !origins[origin] {
+			origins[origin] = true
+			ordered = append(ordered, origin)
+		}
+	}
+	if cfg.Progress != nil {
+		cfg.Progress(ProgressEvent{Phase: "port", Done: 0, Total: len(ordered)})
+	}
+	type state struct {
+		open    bool
+		http    bool
+		scheme  string
+		err     string
+		profile *PortInfo
+	}
+	states := make(map[string]state, len(ordered))
+	profiles := make(map[string]*PortInfo, len(ordered))
+	var mu sync.Mutex
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	workers := cfg.Workers
+	if workers > len(ordered) {
+		workers = len(ordered)
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for origin := range jobs {
+				u, _ := url.Parse(origin)
+				address := u.Host
+				timeout := time.Duration(cfg.Timeout) * time.Millisecond
+				if timeout > 1500*time.Millisecond {
+					timeout = 1500 * time.Millisecond
+				}
+				conn, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", address)
+				current := state{scheme: u.Scheme}
+				if err == nil {
+					current.open = true
+					if cfg.Scheme == "auto" || cfg.Scheme == "" {
+						_ = conn.SetDeadline(time.Now().Add(timeout))
+						client := tls.Client(conn, &tls.Config{ServerName: u.Hostname(), InsecureSkipVerify: true}) // Only detects TLS; the real HTTP client still verifies certificates.
+						if client.Handshake() == nil {
+							current.scheme = "https"
+						} else {
+							current.scheme = "http"
+						}
+						_ = client.Close()
+					} else {
+						_ = conn.Close()
+					}
+					resolvedOrigin := current.scheme + "://" + u.Host
+					current.profile = probePort(ctx, resolvedOrigin, cfg)
+					current.http = current.profile.TCPState == "open"
+					if !current.http && len(current.profile.Probes) > 0 {
+						current.err = current.profile.Probes[0].ErrorCode
+					}
+				} else {
+					current.err = safeError(err)
+				}
+				mu.Lock()
+				states[origin] = current
+				if current.http {
+					profiles[current.scheme+"://"+u.Host] = current.profile
+				}
+				done := len(states)
+				mu.Unlock()
+				if cfg.Progress != nil {
+					status := "closed"
+					if current.http {
+						status = "HTTP " + current.scheme
+					} else if current.open {
+						status = "open, HTTP unconfirmed"
+					}
+					cfg.Progress(ProgressEvent{Phase: "port", Done: done, Total: len(ordered), Target: origin, Status: status})
+				}
+			}
+		}()
+	}
+	for _, origin := range ordered {
+		jobs <- origin
+	}
+	close(jobs)
+	wg.Wait()
+	var kept []string
+	var skipped []Result
+	for _, raw := range urls {
+		if explicit[raw] {
+			kept = append(kept, raw)
+			continue
+		}
+		u, _ := url.Parse(raw)
+		origin := u.Scheme + "://" + u.Host
+		state := states[origin]
+		if !state.http {
+			continue
+		}
+		u.Scheme = state.scheme
+		kept = append(kept, u.String())
+	}
+	for _, origin := range ordered {
+		state := states[origin]
+		if state.http {
+			continue
+		}
+		u, _ := url.Parse(origin)
+		port := 80
+		fmt.Sscanf(u.Port(), "%d", &port)
+		profile := state.profile
+		warning := "TCP connection failed: " + state.err
+		if state.open {
+			warning = "TCP open, but HTTP was not confirmed: " + state.err
+		}
+		if profile == nil {
+			profile = &PortInfo{Origin: origin, TCPState: "closed", Probes: []HTTPProbeInfo{}}
+		} else {
+			profile.TCPState = "open"
+		}
+		skipped = append(skipped, Result{SchemaVersion: SchemaVersion, Scanner: "mcpenum", Target: Target{Input: origin, Host: u.Hostname(), Port: port, Scheme: u.Scheme}, ScanStatus: "failed", Services: []Service{}, Observations: []Observation{}, PortInfo: profile, Warnings: []string{warning}})
+	}
+	return kept, skipped, profiles
+}
+
+func scanPortRange(ctx context.Context, cfg Config) ([]string, error) {
+	if len(cfg.Targets) == 0 {
+		return nil, errors.New("--scan-ports requires --target")
+	}
+	for _, host := range cfg.Targets {
+		if strings.Contains(host, "/") {
+			return nil, errors.New("--scan-ports requires host targets, not CIDR")
+		}
+		if _, _, err := net.SplitHostPort(host); err == nil {
+			return nil, errors.New("--scan-ports requires hosts without explicit ports")
+		}
+	}
+	total := (cfg.PortScanEnd - cfg.PortScanStart + 1) * len(cfg.Targets)
+	if total > 65535 {
+		return nil, errors.New("port scan exceeds 65535 TCP checks; reduce range or hosts")
+	}
+	if cfg.Progress != nil {
+		cfg.Progress(ProgressEvent{Phase: "port-range", Total: total})
+	}
+	type targetPort struct {
+		host string
+		port int
+	}
+	jobs := make(chan targetPort)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var found []targetPort
+	var completed atomic.Int64
+	workers := cfg.PortScanWorkers
+	if workers > total {
+		workers = total
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				address := net.JoinHostPort(job.host, fmt.Sprint(job.port))
+				dialer := &net.Dialer{Timeout: time.Duration(cfg.PortScanTimeout) * time.Millisecond}
+				conn, err := dialer.DialContext(ctx, "tcp", address)
+				if err != nil && !errors.Is(err, syscall.ECONNREFUSED) && ctx.Err() == nil {
+					conn, err = dialer.DialContext(ctx, "tcp", address)
+				}
+				if err == nil {
+					_ = conn.Close()
+					mu.Lock()
+					found = append(found, job)
+					mu.Unlock()
+				}
+				done := int(completed.Add(1))
+				if cfg.Progress != nil && (total <= 128 || err == nil || done%100 == 0 || done == total) {
+					status := safeError(err)
+					if err == nil {
+						status = "open"
+					}
+					cfg.Progress(ProgressEvent{Phase: "port-range", Done: done, Total: total, Target: address, Status: status})
+				}
+			}
+		}()
+	}
+	for _, host := range cfg.Targets {
+		for port := cfg.PortScanStart; port <= cfg.PortScanEnd; port++ {
+			select {
+			case jobs <- targetPort{host, port}:
+			case <-ctx.Done():
+				close(jobs)
+				wg.Wait()
+				return nil, ctx.Err()
+			}
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].host != found[j].host {
+			return found[i].host < found[j].host
+		}
+		return found[i].port < found[j].port
+	})
+	if len(found)*len(cfg.Paths) > 4096 {
+		return nil, errors.New("open ports exceed 4096 MCP candidates; reduce range or paths")
+	}
+	var targets []string
+	for _, job := range found {
+		targets = append(targets, net.JoinHostPort(job.host, fmt.Sprint(job.port)))
+	}
+	return targets, nil
 }
 
 func expandTargets(cfg Config) ([]string, error) {
+	if cfg.Scheme != "" && cfg.Scheme != "auto" && cfg.Scheme != "http" && cfg.Scheme != "https" {
+		return nil, errors.New("scheme must be auto, http, or https")
+	}
 	seen := map[string]bool{}
 	var out []string
 	add := func(s string) {
@@ -160,13 +425,19 @@ func expandTargets(cfg Config) ([]string, error) {
 			if host == "" {
 				return nil, fmt.Errorf("empty host")
 			}
+			if len(out)+len(ports)*len(cfg.Paths) > 4096 {
+				return nil, errors.New("target expansion exceeds 4096 candidates; reduce ports, paths, or hosts")
+			}
 			for _, port := range ports {
 				if port < 1 || port > 65535 {
 					return nil, fmt.Errorf("invalid port: %d", port)
 				}
-				scheme := "http"
-				if port == 443 {
-					scheme = "https"
+				scheme := cfg.Scheme
+				if scheme == "" || scheme == "auto" {
+					scheme = "http"
+					if port == 443 {
+						scheme = "https"
+					}
 				}
 				for _, path := range cfg.Paths {
 					if !safePath(path) {
@@ -177,8 +448,8 @@ func expandTargets(cfg Config) ([]string, error) {
 			}
 		}
 	}
-	if len(out) > cfg.MaxHosts*len(cfg.Ports)*len(cfg.Paths)+len(cfg.URLs) {
-		return nil, errors.New("target expansion exceeds limit")
+	if len(out) > 4096 {
+		return nil, errors.New("target expansion exceeds 4096 candidates")
 	}
 	return out, nil
 }
@@ -201,7 +472,7 @@ func scanURL(ctx context.Context, raw string, cfg Config) Result {
 	if p := u.Port(); p != "" {
 		fmt.Sscanf(p, "%d", &port)
 	}
-	r := Result{SchemaVersion: "2.0", Scanner: "mcpenum", Target: Target{Input: raw, Host: u.Hostname(), Port: port, Scheme: u.Scheme}, ScanStatus: "completed", Services: []Service{}, Observations: []Observation{}, Metrics: Metrics{}}
+	r := Result{SchemaVersion: SchemaVersion, Scanner: "mcpenum", Target: Target{Input: raw, Host: u.Hostname(), Port: port, Scheme: u.Scheme}, ScanStatus: "completed", Services: []Service{}, Observations: []Observation{}, Metrics: Metrics{}}
 	bctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Budget)*time.Millisecond)
 	defer cancel()
 	anon, ac := scanContext(bctx, raw, cfg, "", &r)

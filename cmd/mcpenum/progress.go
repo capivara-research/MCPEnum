@@ -49,6 +49,26 @@ func (r *scanReporter) event(ev mcprecon.ProgressEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch ev.Phase {
+	case "port-range":
+		if r.verbose && ev.Target != "" && (ev.Status == "open" || ev.Total <= 128) {
+			fmt.Fprintf(r.out, "PORT  %s: %s\n", safeLine(ev.Target), safeLine(ev.Status))
+		}
+		if r.progress {
+			r.total = ev.Total
+			r.completed = ev.Done
+			r.draw("Scanning ports")
+		}
+		return
+	case "port":
+		if r.verbose && ev.Done > 0 {
+			fmt.Fprintf(r.out, "PORT  %d/%d | %s: %s\n", ev.Done, ev.Total, safeLine(ev.Target), safeLine(ev.Status))
+		}
+		if r.progress {
+			r.total = ev.Total
+			r.completed = ev.Done
+			r.draw("Checking ports")
+		}
+		return
 	case "total":
 		r.total = ev.Total
 		r.completed = 0

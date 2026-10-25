@@ -11,13 +11,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
       - name: Test
         run: go test ./...
+      - name: Race detector
+        run: go test -race ./...
+      - name: Fuzz parsers
+        run: |
+          go test -run '^$' -fuzz '^FuzzParsePorts$' -fuzztime=5s -parallel=2 ./cmd/mcpenum
+          go test -run '^$' -fuzz '^FuzzSafePath$' -fuzztime=5s -parallel=2 ./internal/mcprecon
+          go test -run '^$' -fuzz '^FuzzParseRPC$' -fuzztime=5s -parallel=2 ./internal/mcprecon
       - name: Vet
         run: go vet ./...
       - name: Build
         run: go build -o mcpenum ./cmd/mcpenum
+      - name: Vulnerability check
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1
+        with:
+          go-version-file: go.mod

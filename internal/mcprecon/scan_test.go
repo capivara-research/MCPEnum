@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,6 +81,74 @@ func containsURL(urls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestPortRangeChecksOpenPortBeforePaths(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	defer s.Close()
+	u, err := url.Parse(s.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := testDefaults()
+	cfg.Targets = []string{u.Hostname()}
+	cfg.Paths = []string{"/mcp"}
+	cfg.PortScanStart, cfg.PortScanEnd = port-1, port+1
+	cfg.Rate = 0
+	results, err := Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Target.Port != port || results[0].Target.Scheme != "http" || results[0].PortInfo == nil || results[0].PortInfo.TCPState != "open" {
+		t.Fatalf("expected only discovered open port %d: %+v", port, results)
+	}
+}
+
+func TestOpenNonHTTPPortSkipsMCPPaths(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = conn.Write([]byte("SSH-2.0-fixture\r\n"))
+			_ = conn.Close()
+		}
+	}()
+	cfg := testDefaults()
+	cfg.Targets = []string{listener.Addr().String()}
+	cfg.Paths = []string{"/mcp", "/sse"}
+	cfg.Rate = 0
+	results, err := Scan(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].PortInfo == nil || results[0].PortInfo.TCPState != "open" || len(results[0].Observations) != 0 {
+		t.Fatalf("non-HTTP service should not receive MCP path probes: %+v", results)
+	}
+}
+
+func FuzzSafePath(f *testing.F) {
+	for _, seed := range []string{"/mcp", "/api/v1/mcp", "", "//host", "/../secret", "/foo?bar", "/a\r\nb"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		if !safePath(input) {
+			return
+		}
+		if !strings.HasPrefix(input, "/") || strings.ContainsAny(input, "\r\n\\?#") || len(input) > 256 {
+			t.Fatalf("unsafe path accepted: %q", input)
+		}
+	})
 }
 
 func TestNonMCPResponseKeepsHTTPFingerprint(t *testing.T) {

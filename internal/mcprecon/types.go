@@ -5,26 +5,34 @@ import (
 	"time"
 )
 
+const SchemaVersion = "2.0"
+
 type Config struct {
-	URLs      []string
-	Targets   []string
-	Ports     []int
-	Paths     []string
-	Token     string
-	Insecure  bool
-	Timeout   int // milliseconds per request
-	Budget    int // milliseconds per endpoint
-	Workers   int
-	MaxPages  int
-	MaxItems  int
-	MaxBody   int64
-	MaxHosts  int
-	AllowCIDR bool
-	Rate      int // global HTTP requests per second; zero disables pacing
-	gate      <-chan time.Time
-	UserAgent string
-	HTTPProbe string              // off, basic, or extended; performed once per origin
-	Progress  func(ProgressEvent) // optional scan telemetry; callbacks may be concurrent
+	URLs            []string
+	Targets         []string
+	Ports           []int
+	Paths           []string
+	Scheme          string // auto, http, or https for expanded targets only
+	Token           string
+	Insecure        bool
+	Timeout         int // milliseconds per request
+	Budget          int // milliseconds per endpoint
+	Workers         int
+	MaxPages        int
+	MaxItems        int
+	MaxBody         int64
+	MaxHosts        int
+	AllowCIDR       bool
+	Rate            int // global HTTP requests per second; zero disables pacing
+	gate            <-chan time.Time
+	UserAgent       string
+	HTTPProbe       string // off, basic, or extended; performed once per origin
+	PortDiscovery   bool   // preflight selected --target ports before endpoint requests
+	PortScanStart   int    // optional inclusive TCP range, scanned before endpoint expansion
+	PortScanEnd     int
+	PortScanWorkers int
+	PortScanTimeout int                 // milliseconds per TCP connection
+	Progress        func(ProgressEvent) // optional scan telemetry; callbacks may be concurrent
 }
 
 type ProgressEvent struct {

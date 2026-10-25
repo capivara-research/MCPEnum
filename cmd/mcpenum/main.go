@@ -25,6 +25,9 @@ func (v *values) Set(x string) error { *v = append(*v, x); return nil }
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "mcpenum:", err)
+		if errors.Is(err, context.Canceled) {
+			os.Exit(130)
+		}
 		os.Exit(2)
 	}
 }
@@ -34,14 +37,15 @@ func run(args []string, out, errout io.Writer) error {
 		usage(out)
 		return nil
 	}
-	if args[0] == "scan" {
-		args = args[1:] // keep existing commands working
+	if len(args) == 1 && args[0] == "--version" {
+		fmt.Fprintln(out, buildVersion())
+		return nil
 	}
 	cfg := mcprecon.Defaults()
 	fs := flag.NewFlagSet("mcpenum", flag.ContinueOnError)
 	fs.SetOutput(errout)
 	var urls, targets, paths values
-	var targetsFile, pathsFile, ports, tokenEnv, tokenFile, format, profile, pathProfile, colorMode string
+	var targetsFile, pathsFile, ports, scanPorts, tokenEnv, tokenFile, format, pathProfile, colorMode string
 	var showSchemas, verbose, quiet bool
 	var progressMode string
 	fs.Var(&urls, "url", "explicit MCP URL (repeatable)")
@@ -50,7 +54,11 @@ func run(args []string, out, errout io.Writer) error {
 	fs.StringVar(&pathsFile, "paths-file", "", "file with one candidate path per line; combines with --path and replaces the built-in profile")
 	fs.StringVar(&pathProfile, "path-profile", "broad", "candidate paths for --target: standard (9), broad (17, default), or extensive (28)")
 	fs.StringVar(&targetsFile, "targets-file", "", "file with one host, host:port or URL per line")
-	fs.StringVar(&ports, "ports", "443,3000,8000,8080", "TCP ports for --target")
+	fs.StringVar(&ports, "ports", "80,443,3000,8000,8080,8443", "TCP ports to check before MCP endpoint tests for --target")
+	fs.StringVar(&scanPorts, "scan-ports", "", "optional TCP discovery range, e.g. 1-65535; open ports receive MCP tests")
+	fs.IntVar(&cfg.PortScanWorkers, "port-workers", cfg.PortScanWorkers, "concurrent TCP checks for --scan-ports")
+	fs.IntVar(&cfg.PortScanTimeout, "port-timeout-ms", cfg.PortScanTimeout, "per-port TCP timeout for --scan-ports")
+	fs.StringVar(&cfg.Scheme, "scheme", cfg.Scheme, "scheme for --target: auto (detect TLS on open ports), http, or https")
 	fs.StringVar(&tokenEnv, "token-env", "", "environment variable holding Bearer token")
 	fs.StringVar(&tokenFile, "token-file", "", "file holding Bearer token")
 	fs.StringVar(&format, "format", "text", "text, json, or jsonl")
@@ -59,13 +67,12 @@ func run(args []string, out, errout io.Writer) error {
 	fs.BoolVar(&verbose, "verbose", false, "show each completed candidate on stderr")
 	fs.BoolVar(&quiet, "quiet", false, "suppress banner and scan progress")
 	fs.StringVar(&progressMode, "progress", "auto", "progress on stderr: auto, always, or never")
-	fs.StringVar(&profile, "profile", "inventory", "scan profile (inventory)")
 	fs.StringVar(&cfg.HTTPProbe, "http-probe", cfg.HTTPProbe, "HTTP port metadata: off, basic (HEAD and OPTIONS), or extended (also bounded GET)")
 	fs.StringVar(&cfg.UserAgent, "user-agent", cfg.UserAgent, "HTTP User-Agent for traffic identification")
 	fs.IntVar(&cfg.Timeout, "timeout-ms", cfg.Timeout, "per-request timeout in milliseconds")
 	fs.IntVar(&cfg.Budget, "budget-ms", cfg.Budget, "per-endpoint budget in milliseconds")
 	fs.IntVar(&cfg.Workers, "workers", cfg.Workers, "parallel endpoint workers")
-	fs.IntVar(&cfg.Rate, "rate", 0, "maximum HTTP requests per second across targets (0: no pacing)")
+	fs.IntVar(&cfg.Rate, "rate", cfg.Rate, "maximum HTTP requests per second across targets (0: no pacing)")
 	fs.BoolVar(&cfg.AllowCIDR, "allow-cidr", false, "allow CIDR target expansion")
 	fs.IntVar(&cfg.MaxHosts, "max-hosts", cfg.MaxHosts, "maximum hosts expanded from a CIDR")
 	fs.IntVar(&cfg.MaxPages, "max-pages", cfg.MaxPages, "maximum pages per collection")
@@ -79,7 +86,7 @@ func run(args []string, out, errout io.Writer) error {
 		return err
 	}
 	if len(fs.Args()) != 0 {
-		return errors.New("unexpected positional arguments")
+		return fmt.Errorf("unexpected positional argument %q; run mcpenum --help", fs.Args()[0])
 	}
 	if format != "text" && format != "json" && format != "jsonl" {
 		return errors.New("format must be text, json, or jsonl")
@@ -92,9 +99,6 @@ func run(args []string, out, errout io.Writer) error {
 	}
 	if colorMode != "auto" && colorMode != "always" && colorMode != "never" {
 		return errors.New("color must be auto, always, or never")
-	}
-	if profile != "inventory" {
-		return errors.New("only inventory profile is implemented")
 	}
 	if pathProfile != "standard" && pathProfile != "broad" && pathProfile != "extensive" {
 		return errors.New("path-profile must be standard, broad, or extensive")
@@ -159,6 +163,18 @@ func run(args []string, out, errout io.Writer) error {
 		return e
 	}
 	cfg.Ports = parsed
+	if scanPorts != "" {
+		parts := strings.Split(scanPorts, "-")
+		if len(parts) != 2 {
+			return errors.New("--scan-ports expects START-END")
+		}
+		first, e1 := strconv.Atoi(parts[0])
+		last, e2 := strconv.Atoi(parts[1])
+		if e1 != nil || e2 != nil || first < 1 || last > 65535 || last < first {
+			return errors.New("invalid --scan-ports range")
+		}
+		cfg.PortScanStart, cfg.PortScanEnd = first, last
+	}
 	if targetsFile != "" {
 		file, e := os.Open(targetsFile)
 		if e != nil {
@@ -196,9 +212,6 @@ func run(args []string, out, errout io.Writer) error {
 	case "json":
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
-		if len(results) == 1 {
-			return enc.Encode(results[0])
-		}
 		return enc.Encode(results)
 	case "jsonl":
 		enc := json.NewEncoder(out)
@@ -244,6 +257,9 @@ func parsePorts(s string) ([]int, error) {
 		}
 		for p := first; p <= last; p++ {
 			if !seen[p] {
+				if len(out) >= 128 {
+					return nil, errors.New("too many selected ports (maximum 128)")
+				}
 				seen[p] = true
 				out = append(out, p)
 			}
@@ -253,5 +269,5 @@ func parsePorts(s string) ([]int, error) {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum --target 127.0.0.1:8000\n  mcpenum --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum --target host.example --ports 443,8000 [--path-profile extensive]\n\nRun mcpenum --help for all options.")
+	fmt.Fprintln(w, "MCPEnum — read-only MCP endpoint discovery and enumeration\n\nUsage:\n  mcpenum --target 127.0.0.1:8000\n  mcpenum --url http://127.0.0.1:8000/mcp [--format text|json|jsonl]\n  mcpenum --target host.example --scan-ports 1-65535\n\nRun mcpenum --help for all options or mcpenum --version for build information.")
 }
