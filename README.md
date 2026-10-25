@@ -21,16 +21,16 @@ Requires **Go 1.22+**.
 git clone https://github.com/capivara-research/MCPEnum.git
 cd MCPEnum
 go build -o mcpenum ./cmd/mcpenum
-./mcpenum scan --url http://127.0.0.1:8000/mcp
+./mcpenum scan --target 127.0.0.1 --ports 8000
 ```
 
-Replace `127.0.0.1:8000/mcp` with the IP address or hostname, port, and MCP endpoint of a system you are authorized to assess. The URL above is an example, not a required local service. A successful build does not start an MCP server; it creates the `mcpenum` scanner binary.
+Replace `127.0.0.1` and `8000` with an authorized host and port. This command tries the default paths `/mcp`, `/api/mcp`, and `/sse` on that port. It does not discover arbitrary paths. The address above is an example, not a required local service. A successful build creates the `mcpenum` scanner binary; it does not start an MCP server.
 
 An alternative installation, verified against this repository, is:
 
 ```sh
 go install github.com/capivara-research/MCPEnum/cmd/mcpenum@latest
-mcpenum scan --url http://127.0.0.1:8000/mcp
+mcpenum scan --target 127.0.0.1 --ports 8000
 ```
 
 The second command assumes your Go binary directory is on `PATH`. Building from a clone works without that PATH setup.
@@ -67,7 +67,7 @@ MCPEnum's own headings and messages are in English. Server-supplied names and de
 
 ## Choosing an IP and endpoint
 
-`--url` accepts a reachable `http://` or `https://` URL for **any authorized target IP or DNS name**. It probes exactly that endpoint. For example:
+Use `--url` when you know the exact endpoint. It accepts a reachable `http://` or `https://` URL for **any authorized target IP or DNS name**:
 
 ```sh
 ./mcpenum scan --url http://10.0.0.5:8000/mcp
@@ -82,12 +82,12 @@ If you know the host but not the endpoint, use `--target` to try selected ports 
 
 | What you know | Use | What MCPEnum tries |
 |---|---|---|
-| Exact URL, including scheme and path | `--url` | That URL only. |
+| Exact URL, including scheme and path | `--url` | That URL only. If the path is omitted, it uses `/mcp` only. |
 | Host and candidate ports/paths | `--target`, `--ports`, `--path` | The selected combinations. |
 | Several scoped hosts or URLs | `--targets-file` | Each line as a host or exact URL. |
 | A small scoped subnet | `--target CIDR --allow-cidr` | Hosts up to `--max-hosts`, then selected ports/paths. |
 
-`--target` tests each selected port/path combination; `--url` does **not** search alternate paths. A normal web API, incorrect path, unreachable port, unsupported stdio-only server, or access control that prevents confirmation cannot produce a valid MCP inventory. See [result states](#reading-the-results-correctly) before interpreting an empty report.
+`--target` tests each selected port/path combination; `--url` does **not** search alternate paths. Neither mode discovers arbitrary paths or ports. A normal web API, incorrect path, unreachable port, unsupported stdio-only server, or access control that prevents confirmation cannot produce a valid MCP inventory. See [result states](#reading-the-results-correctly) before interpreting an empty report.
 
 ## What MCPEnum looks for
 
