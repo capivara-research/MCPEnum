@@ -631,11 +631,17 @@ func validItem(key string, item map[string]any) bool {
 func publicFindings(c Collections) []Finding {
 	var out []Finding
 	for _, v := range []struct {
-		name string
-		coll Collection
-	}{{"tools", c.Tools}, {"resources", c.Resources}, {"resource_templates", c.ResourceTemplates}, {"prompts", c.Prompts}} {
+		name     string
+		singular string
+		plural   string
+		coll     Collection
+	}{{"tools", "tool", "tools", c.Tools}, {"resources", "resource", "resources", c.Resources}, {"resource_templates", "resource template", "resource templates", c.ResourceTemplates}, {"prompts", "prompt", "prompts", c.Prompts}} {
 		if v.coll.Count > 0 && (v.coll.Status == "complete" || v.coll.Status == "partial") {
-			out = append(out, Finding{Code: "public_" + v.name, Summary: fmt.Sprintf("%d %s listed anonymously", v.coll.Count, v.name), Status: "confirmed", Confidence: "high", Category: "exposure", Severity: "info", EvidenceIDs: v.coll.EvidenceIDs})
+			label := v.plural
+			if v.coll.Count == 1 {
+				label = v.singular
+			}
+			out = append(out, Finding{Code: "public_" + v.name, Summary: fmt.Sprintf("%d %s listed anonymously", v.coll.Count, label), Status: "confirmed", Confidence: "high", Category: "exposure", Severity: "info", EvidenceIDs: v.coll.EvidenceIDs})
 		}
 	}
 	return out
