@@ -20,7 +20,7 @@ go build -o mcpenum ./cmd/mcpenum
 
 Replace the example with a host and port in your authorized scope. You do not need to know the endpoint path: the default profile tests 17 candidates on the selected port and reports confirmed MCP endpoints. A `host:port` target tests only that port; a host without a port uses `443,3000,8000,8080`. It does not discover arbitrary paths or scan other ports.
 
-For an endpoint you already know, use its exact URL:
+For an endpoint you already know, use its exact URL. If the URL has no path, MCPEnum uses `/mcp`:
 
 ```sh
 ./mcpenum scan --url https://mcp.example.test/api/mcp
@@ -187,4 +187,4 @@ go vet ./...
 go build -o mcpenum ./cmd/mcpenum
 ```
 
-The project has no third-party Go runtime dependencies. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [LICENSE](LICENSE). Developed by [Fernando Viana (capivara-research)](https://github.com/capivara-research).
+For help, open a [GitHub issue](https://github.com/capivara-research/MCPEnum/issues) without including live credentials. Report security issues privately using [SECURITY.md](SECURITY.md). The project has no third-party Go runtime dependencies. See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE). Developed by [Fernando Viana (capivara-research)](https://github.com/capivara-research).
